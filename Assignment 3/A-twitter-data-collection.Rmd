@@ -1,0 +1,192 @@
+# Part A. Collecting geolocated Twitter data
+
+Load all packages here:
+
+```{r}
+suppressMessages({library(tidyverse)
+library(rtweet)
+library(maps)
+library(countrycode)})
+
+source("https://gist.githubusercontent.com/JBGruber/dee4c44e7d38d537426f57ba1e4f84ab/raw/ce28d3e8115f9272db867158794bc710e8e28ee5/recover_stream.R")
+```
+
+1. Collect a sample of geolocated tweets using your token. The geographic bounding box can span the entire globe or -- probably better for the exercise -- just focus on a given continent (e.g. Europe or Africa). Use the `stream_tweets` function from the `rtweet` package which we also discuss in the lab. If you e.g. use it in its form `stream_tweets(q = c(yourgeocoordinates), timeout = veryhighnumberofseconds, parse = FALSE, file_name = "yourfilename.json")`, you can let it run for some hours and it will continuously write the tweets into the JSON file name you specified. This way you can collect a sufficiently large sample, e.g. 100,000 or 200,000, of geolocated tweets. Note that because of the parse = FALSE option, the function does not return parsed data as an object in R, but just writes it into a file. Should the code break, you can restart it e.g. with another file and eventually merge all files with tweets (when combining different files with tweets, be sure to delete duplicates based on e.g. the tweet ids as the Stream API can return the same tweets in different tries). To avoid this cell with the `stream_tweets` function to run again afterwards (e.g. when knitting the file), you can either use the cache option in the chunk, as shown below, to make sure it only re-runs after you change the code, or simply comment out the code after you have downloaded all tweets and saved the file. __Please do not upload the large .json file with the tweets to GitHub!__ Rather store it somewhere on your computer. (10 points)
+
+```{r, cache=TRUE}
+# Create authentication
+authentication <- list(consumer_key = "12OFs3CMESm3daEBoc4RTOpQM",
+                 consumer_secret = "CKpLbPYJhmaMzXVQ5Bd8YZBnt8KMCAV9QNcmtVVW1xrsA00Mtn",
+                 access_token = "383860067-jFdLhlR05ihLC1liBakggUpi4PIuoJmi2OXsuXMd",
+                 access_token_secret = "LOKu4qPtK346AZG81assmpdJ4kTGqkkUS1l4VW73qO8aR")
+
+# Get twitter token
+twitter_token <- create_token(app = "enter your app name here", 
+                              consumer_key = authentication$consumer_key,
+                              consumer_secret = authentication$consumer_secret,
+                              access_token = authentication$access_token,
+                              access_secret = authentication$access_token_secret)
+
+# Stream tweets from Europe (roughly) for 2 hours (7200s)
+#stream_tweets(q = c(-25, 34, 52, 70), timeout = 7200, parse = FALSE, file_name = '/Users/sam/Documents/my472_hw3_q1_tweets.json')
+```
+
+2. Read/parse the JSON data into R with the `rtweet` functionalities. Should you encounter issues parsing some JSON files, you can also use/source [this]("https://gist.githubusercontent.com/JBGruber/dee4c44e7d38d537426f57ba1e4f84ab/raw/ce28d3e8115f9272db867158794bc710e8e28ee5/recover_stream.R") function. Then e.g. use the `lat_lng` function to add columns for latitude and longitude. You can delete columns that you do not need here, eventually you should have a dataframe with columns that contain the tweet id, latitude, longitude, tweet text, language, country, and country code. How many tweets did you collect? Which are the most popular hashtags? This step may take some time as well, feel free to use the cache function below to make sure you are not re-reading the file every time you compile. (7 points)
+
+### Answers to question 2
+
+1. *We collected a total of 103543 tweets.* \
+2. *The six most popular hashtags and their count are #MilletYokluktaSarayHesapta (423), #MCCelebrity (409), #Baz (337), #nowplaying (257), #Tentaci (153), #p2000 (149).*
+
+```{r, cache=TRUE}
+# parsing our tweeties, COMMENTED OUT FOR KNITING
+
+#eu_tweets <- tryCatch({parse_stream('/Users/sam/Documents/my472_hw3_q1_tweets.json')},
+#                       error = function(e)
+#                           {print(paste("Retrying with alternative function after initial error when parsing file",
+#                                        '/Users/sam/Documents/my472_hw3_q1_tweets.json'));
+#                           return(recover_stream('/Users/sam/Documents/my472_hw3_q1_tweets.json'))})
+
+# ADDED FOR KNITTING
+eu_tweets <- read.csv('/Users/sam/Documents/eu_tweets.csv')
+
+# Add latitude and longitude, COMMENTED OUT FOR KNITTING
+#eu_tweets <- lat_lng(eu_tweets)
+
+# Select only columns we need
+eu_tweets <- eu_tweets %>%
+  select(status_id, lat, lng, text, lang, country, country_code)
+
+# write.csv(eu_tweets, '/Users/sam/Documents/eu_tweets.csv')
+
+# Number of tweets
+nrow(eu_tweets)
+
+# Most popular hashtags
+ht <- str_extract_all(eu_tweets$text, "#[A-Za-z0-9_]+")
+ht <- unlist(ht)
+head(sort(table(ht), decreasing = TRUE))
+```
+
+3. Now examine the language data. Which are the most popular languages? How many unique languages did you find? Can you determine which language code corresponds to tweets whose languages could not be predicted? (5 points)
+
+### Answers to question 3
+
+*After removing tweets from countries not in Europe, the answers are the following:*
+
+1. *The 5 most popular languages and their counts are English (29955), Turkish (16730), Undetermined language (13514), Spanish (12073), French (5858).* \
+2. *There are 52 unique languages (51 if we do not count undetermined languages).* \
+3. *The code relate to undetermined languages is 'und'.*
+
+```{r}
+# To avoid different spellings of countries, take country from country_code
+eu_tweets2 <- eu_tweets
+
+eu_tweets2$country <- eu_tweets2$country_code %>%
+  countrycode(origin = "iso2c", destination = "country.name", custom_match = c('XK' = 'Kosovo'))
+
+# Remove any country not in Europe
+eu_tweets2 <- eu_tweets2 %>%
+  filter(country %in% c('Albania', 'Andorra', 'Armenia', 'Austria', 
+                        'Azerbaijan', 'Belarus', 'Belgium', 
+                        'Bosnia and Herzegovina', 'Bulgaria', 'Croatia',
+                       'Cyprus', 'Czech Republic', 'Denmark', 'Estonia',
+                       'Finland', 'France', 'Georgia', 'Germany',
+                       'Greece', 'Hungary', 'Iceland', 'Ireland', 
+                       'Italy', 'Kosovo', 'Latvia', 'Liechtenstein',
+                       'Lithuania', 'Luxembourg', 'Malta', 'Moldova',
+                       'Monaco', 'Montenegro', 'Netherlands', 
+                       'North Macedonia', 'Norway', 'Poland',
+                       'Portugal', 'Romania', 'Russia', 'San Marino', 
+                       'Serbia', 'Slovakia', 'Slovenia', 'Spain',
+                       'Sweden', 'Switzerland', 'Turkey', 'Ukraine',
+                       'United Kingdom'))
+
+# Most popular languages
+eu_tweets2 %>%
+  group_by(lang) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count))
+
+# Number of unique languages
+length(unique(eu_tweets2$lang))
+
+# Code related to undetermined language
+# und is undetermined
+unique(eu_tweets2$lang)
+```
+
+4. Produce a map of the region of the world where you collected the data that also displays the language distribution by country. For this you can build on the map plot from the lab on the Streaming API. Further information can be found in the [ggplot2 documentation](https://ggplot2.tidyverse.org/). The map could take different forms - think which one could be best at conveying the relevant information. You can check Pablo Barbera's [Twitter profile](https://twitter.com/p_barbera) for a clue! (10 points)
+
+```{r}
+# Map displaying language distribution by country
+
+
+# First create data frame with map data
+# Only include countries in Europe
+# Countries taken from
+map.data <- map_data('world') %>%
+  filter(region %in% c('Albania', 'Andorra', 'Armenia', 'Austria', 
+                      'Azerbaijan', 'Belarus', 'Belgium', 
+                      'Bosnia and Herzegovina', 'Bulgaria', 'Croatia',
+                       'Cyprus', 'Czech Republic', 'Denmark', 'Estonia',
+                       'Finland', 'France', 'Georgia', 'Germany',
+                       'Greece', 'Hungary', 'Iceland', 'Ireland', 
+                       'Italy', 'Kosovo', 'Latvia', 'Liechtenstein',
+                       'Lithuania', 'Luxembourg', 'Malta', 'Moldova',
+                       'Monaco', 'Montenegro', 'Netherlands', 
+                       'North Macedonia', 'Norway', 'Poland',
+                       'Portugal', 'Romania', 'Russia', 'San Marino', 
+                       'Serbia', 'Slovakia', 'Slovenia', 'Spain',
+                       'Sweden', 'Switzerland', 'Turkey', 'Ukraine',
+                       'UK'))
+
+
+## And we use ggplot2 to draw the map:
+# Map base c(-25, 34, 52, 70)
+ggplot(map.data) + geom_map(aes(map_id = region), map = map.data, fill = '#292929', 
+    color = '#ffffff', size = 0.25) + expand_limits(x = map.data$long, y = map.data$lat) + 
+    # Limits for x and y axis
+    scale_x_continuous(limits=c(-25, 52)) + scale_y_continuous(limits = c(35, 70)) +
+    # Adding the dot for each tweet and specifying dot size, transparency, and colour
+    geom_point(data = eu_tweets2, aes(x = lng, y = lat, color = lang), size = 0.1,
+               alpha = 1/5) +
+    # Removing unnecessary graph elements
+  guides(colour = guide_legend(override.aes = list(size=5, alpha = 1))) +
+    theme(axis.line = element_blank(), 
+    	axis.text = element_blank(), 
+    	axis.ticks = element_blank(), 
+        axis.title = element_blank(), 
+        panel.background = element_rect(fill = '#d4ebff',
+                                color = '#d4ebff'), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        plot.background = element_blank())
+
+```
+
+5. Which countries produced the most and the least tweets? Then, create a data frame with only four variables: `country`, `country_code`, `language`, and `n_tweets`, i.e. the number of tweets for each combination of country and language. To make it smaller, you can keep only the rows for which `n_tweets` is greater than 0! Save this data frame into a file called `part_a_country_language_distribution.csv` -- we will work with it in part B.  (3 points)
+
+
+### Answer to question 5
+
+*The country that produced the most tweets is the United Kingdom (25525) and the least is from Liechtenstein (1).*
+
+```{r}
+# Which countries produced the most and least tweets
+eu_tweets2 %>%
+  group_by(country) %>%
+  summarize(n_tweets = n()) %>%
+  arrange(n_tweets) %>%
+  filter(row_number() == 1 | row_number() == n())
+
+# Create new df
+by_country_df <- eu_tweets2 %>%
+  group_by(country, country_code, lang) %>%
+  summarize(n_tweets = n()) %>%
+  filter(n_tweets > 0)
+
+write.csv(by_country_df, 'part_a_country_language_distribution.csv')
+```
+

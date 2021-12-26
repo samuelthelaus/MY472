@@ -1,0 +1,217 @@
+# Part B. Computing a language fractionalization index
+
+Load all packages here:
+
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r message = FALSE}
+library(dplyr)
+library(ggplot2)
+library(DT)
+#install.packages("countrycode")
+library(countrycode)
+```
+
+1. Read the `part_a_country_language_distribution.csv` file into R which you created with the counts of tweets per language and country. Use this dataset to compute an index of language fractionalization at the country level using the formula in Equation (1) in the paper ``Fractionalization'' by Alesina et al (2003). Feel free to do this in the way you prefer, either using the tidyverse, or with loops and your own or base-R functions. (5 points)
+
+```{r}
+data_lang_raw <- read.csv(file = "part_a_country_language_distribution.csv")
+# Filter all rows that are not accompanying a country code
+data_lang <- data_lang_raw %>% filter(!is.na(country_code)) %>% 
+  filter(country_code != "") %>% select(!X)
+# Check that no rows were left out; `anti_join()` should lead to an empty df
+str(anti_join(data_lang_raw, data_lang))
+
+# Grouping by `country_code` in case the same country is labeled
+# with multiple names. To verify, examine the difference between
+# `data_lang` where distinct() is called by `country_code` vs. `country`.
+# Also, keep a value of the total number of tweets in another column.
+data_lang <- data_lang %>% group_by(country_code) %>%
+  mutate(language_fractionalization_index_tweets =
+           1-sum((n_tweets/sum(n_tweets))^2)) %>%
+  mutate(n_total = sum(n_tweets))
+head(data_lang %>% distinct(country_code, .keep_all = TRUE))
+head(data_lang %>% distinct(country, .keep_all = TRUE))
+```
+
+2. Compute some descriptive statistics on this data, either through tables or graphs. Which countries have the highest and lowest levels of language fractionalization? (5 points)
+
+```{r}
+psych::describe(data_lang[,5:6])
+```
+
+```{r}
+df_plot <- data_lang %>% 
+  distinct(country_code, .keep_all = TRUE)
+```
+
+**One risk with looking at the raw data is that countries with very few numbers of tweets will probably have skewed language fractionalization (e.g., Liechtenstein has a language fractionalization of 0 because there is only a single tweet in our dataset). Plotting the histogram of the data suggests there's at least a cluster of countries with fewer than $\text{e}^{2.5} \approx 12$ tweets that may make sense as candidates for discarding when determining the countries with highest and lowest language fractionalization.**
+
+```{r messages = FALSE}
+ggplot(df_plot, aes(x = log(n_total))) + geom_histogram() + labs(y = "Count", x = "Natural Log of Number of Tweets")
+
+ggplot(df_plot, aes(x = n_total, y = language_fractionalization_index_tweets)) +
+  geom_point() + labs(title = "Language Fractionalization by Total Tweets from Country",
+                      y = "Language Fractionalization\n(from Alesina et al. 2003)",
+                      x = "Number of Tweets") + lims(y = c(0,1))
+
+```
+
+
+```{r}
+ggplot(df_plot, aes(country, language_fractionalization_index_tweets)) + 
+  geom_bar(stat = "identity") + labs(title = "Language Fractionalization by Country", y = "Language Fractionalization\n(from Alesina et al. 2003)", x = "Country") + coord_flip() + geom_text(aes(label = round(language_fractionalization_index_tweets, digits = 4)), size = 1.25, hjust = -.1) + 
+  scale_y_continuous(expand = expansion(add = c(0, .1)))
+```
+
+**The countries with the lowest and highest levels of language fractionalization, respectively; countries with fewer than 12 total tweets were discarded. Based on these criteria, the countries with lowest language fractionalization are Russia and the UK, whereas the countries with highest are Belgium and Switzerland.** 
+
+```{r}
+data_lang_sorted <- data_lang %>% ungroup() %>%
+  distinct(country_code, .keep_all = TRUE) %>% filter(n_total > 12) %>%
+       arrange(language_fractionalization_index_tweets) %>% select(country = country, tweets = n_total, fractionalization_index = language_fractionalization_index_tweets)
+head(data_lang_sorted, n = 15)
+```
+
+```{r}
+data_lang_rev_sorted <- data_lang %>% ungroup() %>%
+  distinct(country_code, .keep_all = TRUE) %>% filter(n_total > 12) %>%
+       arrange(desc(language_fractionalization_index_tweets)) %>% select(country = country, tweets = n_total, fractionalization_index = language_fractionalization_index_tweets)
+head(data_lang_rev_sorted, n = 15)
+```
+
+3. Read the .csv file `fractionalization_alesina_et_al.csv` into R. Then, merge this data frame with the country-level fractionalization index you computed using Twitter data. This may be somewhat painful due to the different spellings of the countries. You can e.g. use the `countrycode` package to obtain corresponding country codes for the Alesina et al. data, or manually fix some of the country names so that they are the same across datasets. Throughout this process, check the sample size of the initial and final files to make sure you didn't drop any relevant countries. (5 points)
+
+```{r}
+data_alesina <- as_tibble(read.csv(file = "fractionalization_alesina_et_al.csv"))
+
+code <- data_lang$country_code %>% unique() %>%
+  guess_field()
+# `code` is a sorted dataframe, where first column is 
+# the code from `countrycode` and the second column is
+# percentage matched. Thus, pick the top coding system
+# for generating country names.
+
+data_alesina <- data_alesina %>% 
+  mutate(country_name_alesina = 
+           country, 
+         language_fractionalization_index_alesina_et_al. = 
+           as.numeric(language), 
+         country_code = countrycode(
+           sourcevar = country, 
+           origin = "country.name", 
+           destination = code$code[[1]])) %>%
+  select(country_name_alesina, language_fractionalization_index_alesina_et_al.,
+         country_code)
+
+data_merged <- left_join(data_lang, data_alesina, by = "country_code")
+```
+**Test to ensure we didn't lose information**
+**First, test the country names  by examining the rows where the country names from the dataset of tweets is different from the Alesina et al. dataset. From examination, the differences aren't significant.**
+```{r}
+names_comparison <- cbind(tweet_name = data_merged$country[data_merged$country != data_merged$country_name_alesina], alesina_name = 
+                    data_merged$country_name_alesina[data_merged$country != data_merged$country_name_alesina])
+head(names_comparison %>% as_tibble() %>% group_by(tweet_name) %>% distinct())
+```
+**Second, ensure the number of rows is the same as before to ensure that we didn't throw away any data.**
+```{r}
+length(data_merged$country) == length(data_lang$country)
+```
+**Third, look for countries that were included in our dataset but not in the Alesina et al. dataset. The following countries in our dataset are not in Alesina et al.'s:**  
+
+* Kosovo  
+* Montenegro  
+* San Marino  
+* Serbia  
+
+```{r}
+not_in_alesina <- is.na(data_merged$language_fractionalization_index_alesina_et_al.)
+head(data_merged[not_in_alesina,] %>% as_tibble() %>% group_by(country) %>% slice(1))
+```
+
+4. Compare your new metric with the measure on fractionalization from Alesina et al. What is the correlation between the two? For which main sets of countries do you find differences and similarities? Can you conjecture why? Use any statistical or graphical methods you consider appropriate to answer this question. (10 points)
+
+**First, examine the least and most linguistically fragmented countries according to Alesina et al. (2003). Recall that we found the UK and Russia to be the least linguistically fragmented and Belgium and Switzerland and Belgium to be the most. Alesina et al. (2003) similarly show the UK to be relatively low on the ranking (at #7 when ranked from least linguistically fragmented), although Russia is in the middle of the pack (at #25). Belgium and Switzerland are also found to be highly linguistically fragmented (at #37 and #38) by Alesina et al. (2003).**
+
+
+```{r}
+df_compare <- data_merged[!not_in_alesina,] %>% ungroup() %>% 
+  mutate(index_diff = language_fractionalization_index_tweets - language_fractionalization_index_alesina_et_al.) %>%
+  select(country, n_total, language_fractionalization_index_tweets, language_fractionalization_index_alesina_et_al., index_diff) %>%
+  distinct() %>% mutate(diff_index_diff = index_diff - mean(index_diff))
+
+df_display <- df_compare
+names(df_display) <- c("country", "tot_tweets", "frac_tweets", "frac_alesina", "index_diff", "demeaned_index_diff")
+datatable(df_display[df_display$tot_tweets > 12,] %>% arrange(frac_alesina))
+
+```
+
+```{r}
+lin_model <- lm(data = df_compare, 
+                language_fractionalization_index_alesina_et_al. ~
+                  language_fractionalization_index_tweets)
+ggplot(df_compare, aes(x = language_fractionalization_index_tweets, 
+                       y = language_fractionalization_index_alesina_et_al.)) + 
+  geom_point(aes(size = n_total)) + 
+  geom_text(aes(label = country), nudge_y = 0.05, check_overlap = TRUE) + 
+  lims(x = c(-0.1,1), y = c(0,1)) + 
+  labs(title = "Language Fractionalization Measures",
+       y = "Alesina et al. (2003)",
+       x = "Twitter") + 
+  geom_abline(aes(slope = 1, intercept = 0, color = "Perfect Equality")) +
+  geom_abline(aes(
+    slope = lin_model$coefficients[[2]], 
+    intercept = lin_model$coefficients[[1]],
+    color = "Best Fit Line")) +
+  scale_color_discrete(name = "") + 
+  scale_size_continuous(name = "Tweets from Country")
+  
+```
+
+```{r}
+
+ggplot(df_compare, aes(x = country, y = index_diff)) + 
+  geom_bar(stat = "identity") + labs(title = "Difference in Language Fractionalization Measures", y = "Language Fractionalization (Twitter minus Alesina et al.)", x = "Country") + coord_flip() + lims(y = c(-0.75, 0.75))
+```
+
+
+**The plots above demonstrates that, generally, linguistic fragmentation is higher as measured on Twitter than by Alesina et al. (2003). Indeed, the correlation between the two measures is only:**
+```{r}
+print(cor(df_compare$language_fractionalization_index_tweets, df_compare$language_fractionalization_index_alesina_et_al.))
+```
+
+**The following countries are the farthest off as measured by absolute demeaned difference in indices: **  
+
+* Latvia  
+* Andorra  
+* Albania  
+* Belarus  
+* Hungary  
+
+**One could hypothesize that because these are mostly Eastern European countries that may have seen lots of migration in the previous twenty years that Alesina et al.'s measure couldn't have accounted for, it is reasonable that they fall out of trend. But interestingly, the index values are not all the same sign. That is, if these countries are outliers due to immigration alone, we'd expect their linguistic fractionalization as measured in tweets to be higher than Alesina et al.'s measure, which we see for some but not all (compare Latvia to Hungary).**
+```{r}
+datatable(arrange(df_display[df_display$tot_tweets > 12,], desc(abs(demeaned_index_diff))))
+```
+
+**In general, we can think of three reasons for why Alesina et al.'s measure diverges from ours:**  
+
+* Alesina et al. (2003) calculated linguistic fragmentation based on the *Encyclopedia Britannica*'s reported shares of languages spoken as "mother tongues" in each country; that data, in turn, was published in 2001. The time difference could imply that language fractionalization should be higher today if certain countries have diversified substantially due to, e.g., immigration.  
+* Related, Twitter users are likely not representative of the wider public. It is possible, for example, that Twitter users in each country are more likely to be migrants, tourists, or otherwise speak a non-native language than a random citizen of the country, thus making linguistic fragmentation when measured by Tweets higher than the metric when measured by Alesina et al.'s data.  
+* Tweeting is not necessarily a good indicator of one's linguistic abilities. Presumably one is substantially more adept at one's "mother tongue" --- as is the definition used by the *Encyclopedia Britannica* and cited by Alesina et al. (2003) --- than would be necessary to use Twitter, which allows one to, e.g., retweet tweets in different languages than one's first language.
+
+
+In the end, save your merged file under the name `part_b_fractionalization_output.csv`. It should contain the following columns: `country_code`, `country_name`, `tweets_collected`, `language_fractionalization_index_tweets`, `language_fractionalization_index_alesina_et_al.`
+
+```{r}
+#Create csv for merged data frame
+df_stored <- data_merged %>% filter(n_total>12) %>%
+  select(country_code, country, n_total, language_fractionalization_index_tweets, language_fractionalization_index_alesina_et_al.) %>%
+  distinct()
+names(df_stored) <- c("country_code", "country_name", "tweets_collected", "language_fractionalization_index_tweets", "language_fractionalization_index_alesina_et_al.")
+write.csv(df_stored, 'part_b_fractionalization_output.csv')
+```
+
+**Note that df_stored has 43 unique country codes, and four countries are filtered out for not having enough tweets (Liechtenstein, Moldova, Monaco, and San Marino). This gives us 47 country codes, which is the number of countries in the dataset from part a.**

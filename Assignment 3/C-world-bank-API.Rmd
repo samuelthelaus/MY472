@@ -1,0 +1,186 @@
+Load all packages here:
+
+```{r}
+suppressMessages({
+library(jsonlite)
+library(tidyverse)
+library(httr)
+library(countrycode)
+library(ggplot2)
+})
+```
+
+1. The goal of this part of the assignment is to obtain country-level development indicators that may be related to linguistic fragmentation from the World Bank API. You can read the documentation and instructions [here](https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-basic-api-call-structures).
+
+```{r}
+wb_url <- "http://api.worldbank.org/v2/country/all/indicator/"
+ 
+wb_api<-function(indicator){
+  wburl<-paste0(wb_url,indicator,"?date=2018&per_page=25000&format=json")
+  wb_raw<-fromJSON(wburl)
+  wb_raw<-as.data.frame(wb_raw)%>%
+    filter(!countryiso3code=="")%>%
+     rename( "country code" = countryiso3code,value=value)
+    wb_raw$country <- wb_raw$`country code` %>%
+  countrycode(origin = "iso3c", destination = "country.name", custom_match = c('XKX' = 'Kosovo','EMU'='Euro area'))
+    wb_raw<-na.omit(wb_raw)%>%
+      select(country,value)
+   wb_raw<-na.omit(wb_raw)
+}
+#We specify the year because we need to take one indicator code as input and return a clean data frame "where each row is a country". For output in all years, we can remove the "date=2018&".
+
+#we used the year 2018 due to data availability (for the education indicator we want to add). However, the Twitter data we collected is from 2021, so in actual research this may have some impacts on our analysis interpretation.
+
+#Rows with empty and NA values are removed. The web pages and source codes were looked at, and it was found the values are indeed empty for some countries and/or some years.  In actual project we may need to dig further into the dataset and how it's collected and stored. But in this short project they are removed in order to conduct the following analysis. 
+
+
+```
+
+2. Using the function you just created, get country-level data on two metrics: GDP per capita and another metric that you consider could be correlated with language fractionalization (see the Alesina et al paper for inspiration). (5 points)
+
+```{r}
+ 
+#Indicator selected for GDP per capita here is: NY.GDP.PCAP.KD, which refers to GDP per capita (constant 2010 US$)
+gdp<-wb_api("NY.GDP.PCAP.KD")
+ 
+#Based on the paper, we think literacy rate (SE.ADT.LITR.ZS) may be an useful indicator, but the values are empty for most if not all European countries (the region we want to focus on, as shown in Part A and B). We therefore selected the indicator SE.XPD.TOTL.GD.ZS, referring to the Government expenditure on education, total (% of GDP). We assume it is associated with literacy rate. Further research or analysis may be needed to support such selection in actual research.
+edu<-wb_api("SE.XPD.TOTL.GD.ZS")
+
+#The question asks for GDP per capita, but we included the GDP per capita growth indicator because this is the growth indicator used in the paper,which will be needed later.  
+
+growth<-wb_api("NY.GDP.PCAP.KD.ZG")
+ 
+gdp_edu<-merge(gdp,edu,by = 'country')
+gdp_edu_growth<-merge(gdp_edu,growth,by='country')
+
+
+#we only want data for European countries.
+gdp_edu_growth<-gdp_edu_growth%>%
+   rename("GDP per capita"=value.x,"education spending"=value.y,"GDP per capita growth"=value)%>%
+  filter(country%in% c('Albania', 'Andorra', 'Armenia', 'Austria', 
+                      'Azerbaijan', 'Belarus', 'Belgium', 
+                      'Bosnia and Herzegovina', 'Bulgaria', 'Croatia',
+                       'Cyprus', 'Czech Republic', 'Denmark', 'Estonia',
+                       'Finland', 'France', 'Georgia', 'Germany',
+                       'Greece', 'Hungary', 'Iceland', 'Ireland', 
+                       'Italy', 'Kosovo', 'Latvia', 'Liechtenstein',
+                       'Lithuania', 'Luxembourg', 'Malta', 'Moldova',
+                       'Monaco', 'Montenegro', 'Netherlands', 
+                       'North Macedonia', 'Norway', 'Poland',
+                       'Portugal', 'Romania', 'Russia', 'San Marino', 
+                       'Serbia', 'Slovakia', 'Slovenia', 'Spain',
+                       'Sweden', 'Switzerland', 'Turkey', 'Ukraine',
+                       'United Kingdom'))
+gdp_edu_growth
+
+
+#We don't have data on all listed countries.Countries such as Bosnia and Herzegovina, Bulgaria,Croatia,Czech Republic have empty values for education index. The original webpage confirms that the values are empty. Perhaps data are not collected in these countries. Some country codes do not come with a match, mostly because the original codes aren't countries but a group of countries, such as OECD and less developed countries. There is no need to consider them in our case.
+#We will work with what we have now.
+
+
+
+```
+
+3. Merge this new country-level dataset with the dataset `part_b_fractionalization_output.csv` that you created at the end of part B. As before, you may need to fix some of the country names to ensure that all countries can be merged. (10 points)
+
+```{r}
+
+data_b <- as_tibble(read.csv(file = "part_b_fractionalization_output.csv"))
+data_b
+names(data_b)[3]<-paste("country")
+data_b<-data_b%>%
+  select(country,language_fractionalization_index_tweets
+,language_fractionalization_index_alesina_et_al.
+)
+
+
+data_b_c <- left_join(gdp_edu_growth, data_b, by = "country")
+data_b_c<- na.omit(data_b_c)
+data_b_c
+
+
+```
+
+4. What can you learn about the relationship between language fractionalization and economic development from this new dataset? Can you replicate some of the findings in Tables 5 and 8 of the paper? With the index from the paper? With your Twitter index? Use any statistical or graphical analyses that you consider appropriate to answer this question. A word of caution when interpreting these results:  We can form hypotheses based on such findings, but only from the fact that two or more variables co-move/correlate, we cannot say whether they cause each other to move or not [link](https://en.wikipedia.org/wiki/Correlation_does_not_imply_causation). (10 points)
+
+```{r}
+#First we plot the language fractionalization index and growth to have a look.
+#For European nations in general:
+
+plot_own<-ggplot(data_b_c, aes(language_fractionalization_index_tweets,`GDP per capita growth`,colour = country)) + geom_point()+ labs(title = "economic development vs. fractionalization index (own)",  x="language fractionalization index using Twitter",y = "GDP per capita growth")+xlim(0,1)
+plot_own
+
+
+plot_paper<-ggplot(data_b_c, aes(language_fractionalization_index_alesina_et_al.,`GDP per capita growth`,colour = country)) + geom_point()+ labs(title = "economic development vs. fractionalization index (paper)",   x="language fractionalization index from Alesina et al.",y = "GDP per capita growth")+xlim(0,1)
+plot_paper
+
+# Patterns seem quite random in both cases, except our own language fractionalization index seems to be a bit higher than that of Alesina et al. on average, probably because we removed the countries with too few tweets in part b.
+
+
+own_index<-data_b_c$language_fractionalization_index_tweets
+paper_index<-data_b_c$language_fractionalization_index_alesina_et_al.
+edu_value<-data_b_c$`education spending`
+gdp_growth<-data_b_c$`GDP per capita growth` 
+
+
+
+#Replicate table 5 results (correlation). However do note our analysis is focused on European countries and we only use selected variables, which is not the case in the paper. We will make brief comments on our results as compared to that of the paper's  but we are aware of the population and data difference. 
+
+cor.test(own_index,gdp_growth)
+cor.test(paper_index,gdp_growth)
+cor.test(edu_value,gdp_growth)
+cor.test(edu_value,own_index)
+cor.test(edu_value,paper_index)
+
+
+#Both index suggest negative but very weak correlation between language fractionalization and growth, i.e., higher growth is associated with lower language fractionalization. But it's not statistically significant.
+
+#In our data set, education spending is negatively related to growth,and it's statistically significant.
+
+#In terms of education, not growth, we have conflicting results in the sense that our index seems to have weak positive correlation with education index whereas the paper index have weak negative correlation. Again, they are not statistically significant.
+
+
+#Next we run some basic regression analysis as attempts to understand associations
+#Replicate table 8 (to some extents)
+
+#1.growth ~ language fractionalization
+
+own<-lm(formula = gdp_growth~own_index)
+summary(own)
+paper<-lm(formula = gdp_growth~paper_index)
+summary(paper)
+
+
+#Looking at the economic growth alone, again, our results of different index both suggest weak, negative, and not significant associations between growth and fractionalization (which is similar to the paper's findings). But in our case We are unable to conclude that there is or there is not an association.
+
+#2.growth ~ language fractionalization + education
+
+own1<-lm(formula = gdp_growth~own_index+edu_value)
+summary(own1)
+paper1<-lm(formula = gdp_growth~paper_index+edu_value)
+summary(paper1)
+
+
+#When adding education index,fractionalization index and growth becomes positively associated in the case of using our index and controlling for education. Again, still not significant.
+
+#In both cases, education is negatively associated with growth and the association is statistically significant, which suggests spending higher GDP% on education is associated with lower gdp growth.
+
+#3.education ~ language fractionalization 
+
+own2<-lm(formula = edu_value~own_index)
+summary(own2)
+
+paper3<-lm(formula = edu_value~paper_index)
+summary(paper3)
+
+
+#The paper mentions correlation between illiteracy rate and language fractionalization. We use education spending here, and the correlation is positive but not statistically significant when using our own index, and negative when using paper index. The paper index result(negative) makes sense because the original paper uses illiteracy rate and finds positive association, whereas education spending is probably negatively associated with illiteracy rate.
+
+#The association result based on our own index looks interesting because it seems to indicate that higher %spending on education is associated with increased language fractionalization index. But it's not statistically significant so we are unable to draw conclusion.
+
+#We do take note that we only have very limited data points. We also uses data of education and growth in 2018 while our twitter index is from 2021 and the paper uses mixed year data from about 20 years ago. We may need more and better data in order to have a better analysis.
+
+#When using the World Bank dataset, we are able to find some agreements between our index and paper's index such as they both have negative association with gdp growth, although they perform differently in analysis involving education spending index. 
+
+#Overall we do find the associations to be similar to the paper's major findings on growth and fractionalization. But it's worth noting again, that we only focused on European countries at year 2018 (tweets from 2021).Furthermore, we are unable to support claims/findings from the paper since most of our results are not statistically significant.
+```

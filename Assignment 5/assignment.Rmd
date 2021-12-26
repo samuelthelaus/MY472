@@ -1,0 +1,509 @@
+---
+title: "MY472 MT 2021 - Assignment 5"
+output: html_document
+---
+
+In this assignment, you will analyse political tweets from the time of the 2017 UK General Election campaign. The tweet data can be downloaded from this dropbox [link](https://www.dropbox.com/sh/ktl1a3672yl6te0/AAA2At9pSt9hZ-KsaT0Mwbp2a?dl=0). The files contain tweets from candidates and parties, and replies to these accounts.
+
+Note that the files in the dropbox link are compressed. Information on candidates, parties and associated Twitter accounts can be found in "candidate_information.csv" in the repo. This e.g. allows you to find out which tweets and users belong to politicians/parties and which ones are replies from other users, but the file also contains other information.
+
+__Exercise 1.__
+
+There are 113 tar.gz files in the dropbox folder containing JSON files with both tweets and user information. In this exercise, you are asked to process all files into a relational database (just like in the lecture and class use `DBI` with `SQLite` to create and query this database). There can be several strategies to read the files into R, one is to use the `readtext` function from the `readtext` package which can read compressed files directly (hint: you should also check out the `source` argument in this function which has an option tailored directly to Twitter data).
+
+The goal is to separate the fields in the JSON documents containing tweet and user information into two tables of a relational database. You can name these tables `tweets` and `users`. Before you write the tables into your database, you can process the tweet data with `dplyr` or other packages. Make sure that there are no duplicates among the users and tweets in the final database (i.e. the tweet id is **unique** in the `tweets` table, and the user id is **unique** in `users` table). Also make sure that these two tables can be combined afterwards using a column common to the tables. Please also add one indicator column (i.e. either TRUE/FALSE or 1/0) to each of your tables, in detail:
+
+- A column "screen_name_in" in the `users` table indicating whether an account is among the politician/party accounts
+- A column "in_reply_to_screen_name_in" in the `tweets` table indicating whether a tweet was a reply to a politician/party account
+
+(Hint: You can use the file "candidate_information.csv" to determine which users and tweets are from the politicians/parties and which ones are not)
+
+1.1 Create a relational `SQLite` database containing the two tables `users` and `tweets`. Once the database has been created, use SQL queries to:
+
+1.2 Print out the total number of rows of each table.
+
+1.3 Print out all column names of each table.
+
+1.4 Print out the first five rows of each table.
+
+Then disconnect again from your database (in the next exercise we will use a different database).
+
+__Important note: Please store the files with tweets and your database outside this repo. We will grade the knitted HTML document and do not require these large files. Furthermore, processing the files will take some time, so it is normal that knitting the final document takes time. Do not load data from interim steps but make sure your code fully creates a database in Exercise 1 from the `ge2017` folder when knitting.__
+
+
+## Answers to exercise 1
+
+*For the tweets, we have a simple approach where we select the relevant columns, make a new variable to say whether the tweet is a reply to a candidate, and finally assign a tweet_id.*
+
+*For the users, we want the most up-to-date numbers, and therefore have a bit of a more complex method. We collect the relevant columns and make a massive table without caring about if the user already exists. Then we pull the whole table into R again, but only get the rows where the statuses_count is the maximum for that user. We then overwrite the old table with this subset. We do this as we want the latest statuses_count for each user. The maximum is likely to be the latest value as it is bound to increase. We use statuses_count specifically as this is the column that should increase with every tweet.*
+
+```{r}
+# Load packages
+suppressMessages({library(tidyverse)
+                  library(DBI)
+                  library(RSQLite)
+                  library(readtext)
+                  library(quanteda)
+                  library(quanteda.textplots)
+                  library(countrycode)})
+```
+
+```{r}
+# Create/connect to DB
+db <- dbConnect(SQLite(), '/Users/sam/Desktop/week4/tweets-db.sqlite')
+
+# Read candidate info
+cand <- read.csv('/Users/sam/Documents/GitHub/assignment-05-samuelthelaus/candidate_information.csv',
+                   stringsAsFactors = F)
+
+# Create table for candidate info and users (empty)
+dbWriteTable(db, 'cand', cand, overwrite = T)
+users <- setNames(data.frame(matrix(ncol=11, nrow=0)), 
+                  c('verified', 'user_created_at', 'user_url',
+                    'name', 'user_lang', 'screen_name', 
+                    'full_name', 'statuses_count', 'followers_count',
+                    'favourites_count', 'friends_count'))
+
+dbWriteTable(db, 'users', users, overwrite = T)
+
+# Get all file paths for twitter data
+fls <- list.files('/Users/sam/Desktop/week4/ge2017', full.names = TRUE)
+
+# Set tweet_id to 0
+tweet_id <- 0
+
+# Get rid of summarize print
+options(dplyr.summarise.inform = F)
+
+# Iterate through file paths
+for(f in fls) {
+  
+  # print to know which file we're on if errors occur
+  # Commented out for knitting
+  # print(f)
+  
+  # Read file
+  tweet <- as_tibble(readtext(f, source = 'twitter'))
+  
+  # Make tweets table
+  # Select relevant columns
+  # Make 2 new columns using tweet_id and candidate info
+  ts <- tweet %>%
+    dplyr::select(text, retweet_count, favorite_count,
+           favorited, truncated, in_reply_to_screen_name,
+           retweeted, created_at,
+           in_reply_to_status_id_str,
+           in_reply_to_user_id_str, lang, listed_count,
+           location, time_zone, utc_offset, screen_name,
+           country_code, country, expanded_url,
+           url) %>%
+    mutate(in_reply_to_screen_name_in = if_else(is.na(in_reply_to_screen_name),
+                                                0,
+                                                if_else(in_reply_to_screen_name %in% cand$screenName, 1, 0)),
+           tweet_id = paste('tweet_', tweet_id + row_number(), sep=''))
+  
+  # Add to table in SQL database
+  dbWriteTable(db, 'tweets', ts, append = TRUE)
+  
+  # Update tweet_id for next file
+  tweet_id <- tweet_id + nrow(ts)
+  
+  # Make users table
+  # Get screen_name from users table in db
+  # Make a users df from tweet
+  # Group by relevant columns that stay the same
+  # Get max value from other columns as we want "latest" number
+  # Make screen_name char as some are int
+  # Append to table
+  
+  usr <- tweet %>%
+    group_by(verified, user_created_at, user_url, name, user_lang,
+             screen_name, full_name) %>%
+    summarize(statuses_count = max(statuses_count, na.rm=T),
+           followers_count = max(followers_count, na.rm=T),
+           favourites_count = max(favourites_count, na.rm=T),
+           friends_count = max(friends_count, na.rm=T)) %>%
+    mutate(screen_name = as.character(screen_name))
+  
+  # Add to table in SQL database
+  dbWriteTable(db, 'users', usr, append = TRUE)
+  
+}
+
+# Continue on users
+# Get table from db
+# group_by columns as before
+# Filter out rows that don't have highest statuses_count for that screen_name
+# Overwrite existing table
+users <- dbGetQuery(db, "SELECT * FROM users")
+
+users <- dbGetQuery(db, "SELECT verified, user_created_at, user_url, name,
+                         user_lang, CAST(screen_name AS TEXT) as screen_name,
+                         full_name,
+                         MAX(statuses_count) as statuses_count,
+                         MAX(followers_count) as followers_count,
+                         MAX(favourites_count) as favourites_count,
+                         MAX(friends_count) as friends_count
+                         FROM users
+                         GROUP BY screen_name")
+
+# Check that number of unique screen_names is same as n_rows
+length(unique(users$screen_name)) == nrow(users)
+
+dbWriteTable(db, 'users', users, overwrite=T)
+
+# 1.2 Total rows in each table
+# 221711 tweets from 91334 users
+dbGetQuery(db, "SELECT COUNT(*) FROM tweets")
+dbGetQuery(db, "SELECT COUNT(*) FROM users")
+
+# 1.3 Column names (name column)
+dbGetQuery(db, "PRAGMA TABLE_INFO(tweets)")
+dbGetQuery(db, "PRAGMA TABLE_INFO(users)")
+
+# 1.4 First 5
+dbGetQuery(db, "SELECT * FROM tweets LIMIT 5")
+dbGetQuery(db, "SELECT * FROM users LIMIT 5")
+
+# Disconnect
+dbDisconnect(db)
+
+```
+
+__Exercise 2.__
+
+*Important note:* In this exercise *do not* use your previous database. Instead use the database `uk_election_tweets_small.sqlite` which is supplied in the assignment repo. Answer questions 2.1 - 2.9 using *SQL syntax only* (sending SQL statements through R is fine, no need to change chunk type).
+
+Connect to `uk_election_tweets_small.sqlite`:
+
+```{r}
+db <- dbConnect(SQLite(), '/Users/sam/Documents/GitHub/assignment-05-samuelthelaus/uk_election_tweets_small.sqlite')
+```
+
+2.1 How many tweets are in the `tweets` table? How many users in the `users` table?
+
+```{r}
+# Tweets in tweets (22130)
+dbGetQuery(db, "SELECT COUNT(*) AS total_tweets FROM tweets")
+
+# Users in users (5572)
+dbGetQuery(db, "SELECT COUNT(*) AS total_users FROM users")
+```
+
+2.2 How many tweets are replies to politicians/parties? How many accounts are from politicians/parties, how many from other users?
+
+```{r}
+# Replies to politicians/parties (1829)
+dbGetQuery(db, "SELECT SUM(in_reply_to_screen_name_in) AS replies 
+                FROM tweets")
+
+# number of accounts (4517 vs 1055)
+dbGetQuery(db, "SELECT CASE WHEN screen_name_in == 1 THEN 'Politician/Party' ELSE 'Other' END AS type, COUNT(*) AS num_accounts
+                FROM users
+                GROUP BY screen_name_in")
+```
+
+2.3 Which screen_name has posted the highest count of tweets?
+
+```{r}
+# DrTeckKhong with 149 tweets
+dbGetQuery(db, "SELECT COUNT(*) as total_tweets, users.screen_name 
+                FROM tweets JOIN users
+                ON tweets.user_id_str = users.user_id_str
+                GROUP BY users.screen_name
+                ORDER BY total_tweets DESC
+                LIMIT 1")
+```
+
+2.4 Who has the highest number of followers?
+
+```{r}
+# RufusHound has 1205426 followers
+dbGetQuery(db, "SELECT MAX(followers_count) as top_influencer_vibes, screen_name FROM users")
+```
+
+2.5 Among politicians, who has the highest number of followers?
+
+```{r}
+# jeremycorbyn has 968629 followers
+dbGetQuery(db, "SELECT MAX(followers_count) as top_influencer_vibes, screen_name
+                FROM users
+                WHERE screen_name_in = 1")
+```
+
+2.6 Which tweet has the earliest timestamp in the data? Which the latest?
+
+```{r}
+# To ORDER BY twice, make 2 SELECT statements within select statements
+dbGetQuery(db, "SELECT 'First', * FROM (
+                  SELECT * FROM tweets ORDER BY created_at_dt ASC LIMIT 1
+                  )
+                UNION
+                SELECT 'Last', * FROM (
+                  SELECT * FROM tweets ORDER BY created_at_dt DESC LIMIT 1
+                  )")
+```
+
+2.7 Which were the top ten accounts which received most replies and how many replies did their tweets get?
+
+```{r}
+dbGetQuery(db, "SELECT in_reply_to_screen_name,   
+                COUNT(in_reply_to_screen_name) AS count
+                FROM tweets
+                GROUP BY in_reply_to_screen_name
+                ORDER BY count DESC
+                LIMIT 10")
+```
+
+2.8 How many tweets contained the word brexit? What proportion of tweets by only politicians contained the word brexit, what proportion of tweets by other users?
+
+```{r}
+# Total mentioning Brexit
+dbGetQuery(db, 
+  "SELECT SUM(CASE WHEN text LIKE '%brexit%' THEN 1 ELSE 0 END)
+  AS sum_brexit
+  FROM tweets")
+
+# Proportion from politicians and others
+dbGetQuery(db, 
+  "SELECT SUM(CASE WHEN tweets.text LIKE '%brexit%' THEN 1 ELSE 0 END)*100.0/COUNT(*) AS percent_brexit, users.screen_name_in
+  FROM tweets JOIN users
+  ON tweets.user_id_str = users.user_id_str
+  GROUP BY users.screen_name_in")
+```
+
+2.9 How many tweets have geolocation information (lat or lon value)? It is good to keep in mind how small this number is and that it can bias outcomes of studies as these tweets are not representative of all other tweets.
+
+```{r}
+# There is no lat or lon column in the tweets table
+# Thus we first check how many users have lat/lon data
+# This comes out to 0, so there is no geolocation data
+dbGetQuery(db, "SELECT SUM(CASE WHEN lat IS NOT NULL OR lon IS NOT NULL THEN 1 ELSE 0 END) FROM users")
+```
+
+
+__Exercise 3.__
+
+We can analyse Twitter hashtags and account mentions well with quanteda. Read https://quanteda.io/articles/pkgdown/examples/twitter.html and answer the following questions. Obtain the relevant data from the database `uk_election_tweets_small.sqlite` with a SQL query here and answer all questions 3.1 - 3.3 afterwards with `quanteda` rather than SQL.
+
+```{r}
+# Not really necessary as we already connected, but might as well
+db <- dbConnect(SQLite(), '/Users/sam/Documents/GitHub/assignment-05-samuelthelaus/uk_election_tweets_small.sqlite')
+
+text_data <- dbGetQuery(db, "SELECT text FROM tweets")
+```
+
+3.1 What are the top 10 popular hashtags?
+
+```{r}
+# Get all hashtags, unlist, sort and select top 10
+ht <- str_extract_all(text_data$text, "#[A-Za-z0-9_]+")
+ht <- unlist(ht)
+sort(table(ht), decreasing = TRUE)[1:10]
+```
+
+3.2 Who was mentioned (i.e. ‘@name’) the most in tweets?
+
+```{r}
+# Mentioned most was Jeremy Corbyn
+mentions <- str_extract_all(text_data$text, "@[A-Za-z0-9_]+")
+mentions <- unlist(mentions)
+sort(table(mentions), decreasing = TRUE)[1]
+```
+
+3.3 Choose a small number of hashtags or accounts that could be interesting to analyse (e.g. about one topic or a group of politicians). Visualise how these hashtags or user mentions are related in a network with `textplot_network` from `quanteda.textplots`. What do you find?
+
+## Answer
+
+*The plot was made looking at tweets that mention water. The resulting plot seems to have a few clusters. One mentioning tories (tori), TPIMs (Terrorism Prevention and Investigation Measures), Labour, and govt, perhaps related mainly to government topics. Another cluster has key words such as paid, ownership, and dividend, perhaps talking about water investments. Another cluster mentions "energi", "video" and "explain", maybe being more focused on work and innovation around water. There are a few tweets that don't necessarily fall into a cluster, for example the user @jimwaterson, that happens to have water in the name.*
+
+```{r}
+# We select texts that mention water (for no particular reason)
+# This gives us 69 tweets
+text_data2 <- dbGetQuery(db, "SELECT text FROM tweets
+                              WHERE text LIKE '%water%'")
+
+# We process the data and make dfm 
+dfm <- text_data2$text %>%
+  corpus() %>% 
+  tokens(remove_punct = TRUE, remove_numbers = TRUE) %>%
+  tokens_remove(stopwords('en')) %>%
+  tokens_wordstem() %>% 
+  dfm() %>%
+  dfm_trim(min_termfreq = 2)
+
+# Plot (reduce vertex label size to see more words)
+textplot_network(dfm, vertex_labelsize = 2)
+
+# Disconnect from db
+dbDisconnect(db)
+```
+
+
+__Exercise 4.__
+
+Revisiting the data sources from Assignment 4, the [World Health Organization](https://www.who.int/data/gho), [St. Louis Federal Reserve](https://fred.stlouisfed.org/), and/or data on wealth and income inequality from the [World Inequality Database](https://wid.world/data/), download some data (no need to use the APIs here) and organise it in a `SQLite` database. Before storing the tables in the database, use R packages such as `dplyr` to reshape and process the data. The final database should contain at least 2 tables. More comprehensive and well thought through databases that link data from different data sources will receive higher marks here. We will grade the knitted HTML file, but feel free to store the database within your submission folder to allow us to check any errors in RStudio (not essential). Do note, however, that if the database is very large any GitHub push/pulls will be slower and less reliable for you when submitting and us when marking.
+
+Download and process data into a final `SQLite` database. Briefly describe why you structured the database the way you did. Then use SQL queries to:
+
+1. Print out the total number of rows for each table in your database. Print out the column names for each table.
+
+2. Print out the first 10 rows for each table. 
+
+3. Show whether all tables in the database can be (directly or indirectly) joined with SQL queries. Print out the first 5 rows of the joined tables.
+
+```{r}
+# We import the data and clean each table
+# we make an iso3c country_code column to be able to combine them
+
+# Malaria deaths (from WHO)
+malaria_deaths <- read.csv('/Users/sam/Desktop/week4/q4/malaria_deaths.csv')
+
+malaria_deaths <- malaria_deaths %>%
+  select(ParentLocationCode, ParentLocation,
+         SpatialDimValueCode, Location, Period,
+         FactValueNumeric)
+
+colnames(malaria_deaths) <- c('parent_loc_code', 'parent_location',
+                              'country_code', 'country', 'year',
+                              'deaths')
+
+malaria_deaths$country_code <- countrycode(malaria_deaths$country, origin = 'country.name', destination = 'iso3c')
+
+# Hospital beds per 10,000 population (from WHO)
+hospital_beds <- read.csv('/Users/sam/Desktop/week4/q4/hospital_beds.csv')
+
+hospital_beds <- hospital_beds %>%
+  select(ParentLocationCode, ParentLocation,
+         SpatialDimValueCode, Location, Period,
+         FactValueNumeric)
+
+colnames(hospital_beds) <- c('parent_loc_code', 'parent_location',
+                              'country_code', 'country', 'year',
+                              'beds')
+
+hospital_beds$country_code <- countrycode(hospital_beds$country, origin = 'country.name', destination = 'iso3c')
+
+# Median age (from WHO)
+median_age <- read.csv('/Users/sam/Desktop/week4/q4/median_age.csv')
+
+median_age <- median_age %>%
+  select(ParentLocationCode, ParentLocation,
+         SpatialDimValueCode, Location, Period,
+         FactValueNumeric)
+
+colnames(median_age) <- c('parent_loc_code', 'parent_location',
+                              'country_code', 'country', 'year',
+                              'age')
+
+median_age$country_code <- countrycode(median_age$country, origin = 'country.name', destination = 'iso3c')
+
+# US unemployment rate (from FRED)
+unrate <- read.csv('/Users/sam/Desktop/week4/q4/UNRATE.csv')
+
+unrate <- unrate %>%
+  mutate(year = as.numeric(substr(DATE, 1, 4)))
+
+colnames(unrate) <- c('date', 'unrate', 'year')
+
+unrate$country_code <- countrycode(rep('USA', nrow(unrate)), origin = 'country.name', destination = 'iso3c')
+
+# GDP per adult (from WID)
+# here we remove NAs as some rows contain information on whole continents (not countries, which we like to look at)
+gdp_per_adult <- read.csv('/Users/sam/Desktop/week4/q4/gdp_per_adult.csv', sep = ';', header = F, skip = 1)
+
+gdp_per_adult <- gdp_per_adult %>%
+  select(V1, V4, V5)
+
+colnames(gdp_per_adult) <- c('country', 'year', 'gdp_per_adult')
+
+gdp_per_adult$country_code <- countrycode(gdp_per_adult$country, origin = 'country.name', destination = 'iso3c')
+
+gdp_per_adult <- gdp_per_adult %>%
+  drop_na()
+
+# Create database
+db <- dbConnect(SQLite(), '/Users/sam/Desktop/week4/mydata-db.sqlite')
+
+# Write tables
+dbWriteTable(db, 'malaria_deaths', malaria_deaths, overwrite = T)
+dbWriteTable(db, 'hospital_beds', hospital_beds, overwrite = T)
+dbWriteTable(db, 'median_age', median_age, overwrite = T)
+dbWriteTable(db, 'unrate', unrate, overwrite = T)
+dbWriteTable(db, 'gdp_per_adult', gdp_per_adult, overwrite = T)
+
+
+# Number of rows of each table
+dbGetQuery(db, "SELECT COUNT(*) FROM malaria_deaths")
+dbGetQuery(db, "SELECT COUNT(*) FROM hospital_beds")
+dbGetQuery(db, "SELECT COUNT(*) FROM median_age")
+dbGetQuery(db, "SELECT COUNT(*) FROM unrate")
+dbGetQuery(db, "SELECT COUNT(*) FROM gdp_per_adult")
+
+# Column names of each table
+dbGetQuery(db, "PRAGMA TABLE_INFO(malaria_deaths)")
+dbGetQuery(db, "PRAGMA TABLE_INFO(hospital_beds)")
+dbGetQuery(db, "PRAGMA TABLE_INFO(median_age)")
+dbGetQuery(db, "PRAGMA TABLE_INFO(unrate)")
+dbGetQuery(db, "PRAGMA TABLE_INFO(gdp_per_adult)")
+
+# Print first 10 rows of each table
+dbGetQuery(db, "SELECT * FROM malaria_deaths LIMIT 10")
+dbGetQuery(db, "SELECT * FROM hospital_beds LIMIT 10")
+dbGetQuery(db, "SELECT * FROM median_age LIMIT 10")
+dbGetQuery(db, "SELECT * FROM unrate LIMIT 10")
+dbGetQuery(db, "SELECT * FROM gdp_per_adult LIMIT 10")
+
+# JOIN all tables
+# Start with gdp_per_adult as it has most data and left join
+dbGetQuery(db, "SELECT * FROM gdp_per_adult
+           LEFT JOIN malaria_deaths ON gdp_per_adult.country_code = malaria_deaths.country_code
+           LEFT JOIN hospital_beds ON gdp_per_adult.country_code = hospital_beds.country_code
+           LEFT JOIN median_age ON gdp_per_adult.country_code = median_age.country_code
+           LEFT JOIN unrate ON gdp_per_adult.country_code = unrate.country_code
+           LIMIT 5")
+
+# Then show that all tables can be individually joined to the other tables
+
+# Start with gdp_per_adult
+dbGetQuery(db, "SELECT * FROM gdp_per_adult
+           JOIN malaria_deaths ON gdp_per_adult.country_code = malaria_deaths.country_code
+           LIMIT 5")
+dbGetQuery(db, "SELECT * FROM gdp_per_adult
+           JOIN hospital_beds ON gdp_per_adult.country_code = hospital_beds.country_code
+           LIMIT 5")
+dbGetQuery(db, "SELECT * FROM gdp_per_adult
+           JOIN median_age ON gdp_per_adult.country_code = median_age.country_code
+           LIMIT 5")
+dbGetQuery(db, "SELECT * FROM gdp_per_adult
+           JOIN unrate ON gdp_per_adult.country_code = unrate.country_code
+           LIMIT 5")
+
+# malaria_deaths
+dbGetQuery(db, "SELECT * FROM malaria_deaths
+           JOIN hospital_beds ON malaria_deaths.country_code = hospital_beds.country_code
+           LIMIT 5")
+dbGetQuery(db, "SELECT * FROM malaria_deaths
+           JOIN median_age ON malaria_deaths.country_code = median_age.country_code
+           LIMIT 5")
+dbGetQuery(db, "SELECT * FROM malaria_deaths
+           JOIN unrate ON malaria_deaths.country_code = unrate.country_code
+           LIMIT 5")
+
+# hospital_beds
+dbGetQuery(db, "SELECT * FROM hospital_beds
+           JOIN median_age ON hospital_beds.country_code = median_age.country_code
+           LIMIT 5")
+dbGetQuery(db, "SELECT * FROM hospital_beds
+           JOIN unrate ON hospital_beds.country_code = unrate.country_code
+           LIMIT 5")
+
+# median_age
+dbGetQuery(db, "SELECT * FROM median_age
+           JOIN unrate ON median_age.country_code = unrate.country_code
+           LIMIT 5")
+
+# Disconnect from db
+dbDisconnect(db)
+```
+

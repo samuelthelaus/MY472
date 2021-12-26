@@ -1,0 +1,384 @@
+# Assignment 4
+
+The goal of Exercises 1-3 is to replicate three plots about different topics as closely as possible using `ggplot2`. Do not worry if you cannot replicate the plots 100%, the main purpose of this assignment is to learn more about the `ggplot2` package and visualisation. Trying to replicate plots is an excellent way to do this. Exercise 4 then allows you to develop own visualiations with `ggplot2`.
+
+```{r}
+# Load packages here
+suppressMessages({
+  library(tidyverse)
+  library(ggthemes)
+  library(maps)
+  library(countrycode)
+  library(viridis)
+  library(ggrepel)
+  library(scales)
+  })
+```
+
+## 1. Chaos (19 points)
+
+In this exercise, you will create one of the most famous plots in chaos theory. The equation of the [logistic map](https://en.wikipedia.org/wiki/Logistic_map) is very simple, but its behaviour is stunningly complex:
+
+$$
+x_{n+1} = rx_{n}(1-x_{n})
+$$
+
+Starting with an initial value of $x_{0}$ between one and zero, e.g. 0.5, and setting a constant value of r e.g. between zero and four, the equation can be iterated forward. We will only care about the visualisation here, but if you are interested in the background of this fascinating plot, e.g. have a look at [this](https://youtu.be/ovJcsL7vyrk) or [this]( https://youtu.be/ETrYE4MdoLQ) video.
+
+The goal is to create a plot with different values of r on the x-axis and then x values on the y-axis corresponding to each r value. In parts of the plot, all these x values will be on a single point, but for other r values x moves perpetually.
+
+The following code cell computes the dataset for you. You are welcome to study the code, but this is not part of the assignment and you do not have to worry about how exactly it works (this is not a course about chaos theory after all). The only part to do is to plot the data such it resembles the figure below. Data contained in `logistic_map_data` is already in a tidy format, one variable denotes the value of r, one variable the value of the associated x's. For each value of r there are n=1000 observations/rows of x values (these can be constant or fluctuating, depending on the value of r). Only the colour has to be added.
+
+```{r}
+# x observations for each r value
+n <- 1000
+# Step between each r value
+r_step <- 0.001
+
+r_range <- seq(2.5, 4, by = r_step)
+to_discard <- 500 # numbers of observations discarded before the n which are stored
+logistic_map_data <- matrix(0, nrow = n*length(r_range), 2)
+for (r in r_range) {
+  
+  current_logistic_map_series <- numeric(n+to_discard)
+  current_logistic_map_series[1] <- 0.5
+  
+  for (k in 1:(n+to_discard-1)) {
+    
+    current_logistic_map_series[k+1] <- r*current_logistic_map_series[k]*(1-current_logistic_map_series[k])
+    
+  }
+  
+  start_index <- 1+n*(match(r, r_range) - 1)
+  end_index <- n*match(r, r_range)
+  
+  logistic_map_data[start_index:end_index,1] <- r
+  logistic_map_data[start_index:end_index,2] <- tail(current_logistic_map_series,n)
+
+}
+
+logistic_map_data <- as_tibble(data.frame(logistic_map_data))
+colnames(logistic_map_data) <- c("r", "x")
+```
+
+Hint: Create your final dataset with `n <- 1000` and `r_step <- 0.001`, however, for these values it takes R some time to compute the plot. When building your plot, adjusting axes, colours, etc., one approach is to first use e.g. `n <- 10` and `r_step <- 0.01` until you have a version of the plot that you are happy with. Just note that the opacity parameter will have to be decreased again once you have increased `n` because now there are more points in the plot.
+
+
+```{r}
+# Create color variable, values chosen by looking at the plot provided
+logistic_map_data <- logistic_map_data %>%
+  mutate(Color = if_else(r < 3.5, 'a', 
+                         if_else(r < 3.6, 'b', 
+                                 if_else(r < 3.7, 'c',
+                                         if_else(r < 3.8, 'd',
+                                                 if_else(r < 3.9, 'e', 'f'))))))
+
+ggplot(logistic_map_data, aes(x = r, y = x, color = Color)) +
+  geom_point(size = 0.001, alpha = .01) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line.x = element_line(color = 'black'),
+        axis.line.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = 'none')
+  
+```
+
+![](plots/chaos.png)
+
+
+## 2. Popularity metrics by party and gender (19 points)
+
+For this exercise, you will have to replicate a figure that displays the average popularity metrics of legislators grouped by gender and party. Note that this example involves some reshaping of the data which you can do with `dyplr` from the `tidyverse`.
+
+```{r}
+# Data for the plot
+fb <- read.csv('data/fb-congress-data.csv', stringsAsFactors=FALSE)
+```
+
+```{r, fig.width=12, fig.height=6}
+fb <- fb %>%
+  drop_na() %>% # remove NAs
+  filter(party != 'Independent') %>% # only looks at D/R
+  mutate(x = if_else(party == 'Democrat' & gender == 'F', 'D-F',
+                        if_else(party == 'Democrat' & gender == 'M', 'D-M',
+                                if_else(party == 'Republican' & gender == 'F', 'R-F', 'R-M')))) %>% # Make new column with party & gender
+  pivot_longer(colnames(fb[5:12]), names_to = 'social_metric', values_to = 'count') %>% # pivot longer over metrics
+  mutate(social_metric = factor(social_metric, 
+                                levels = c('likes_count', 'comments_count',
+                                       'shares_count', 'love_count',
+                                       'haha_count', 'wow_count',
+                                       'angry_count', 'sad_count'))) %>% # recode
+  group_by(social_metric, x) %>% # group by metric and party+gender
+  summarize(mean = mean(count, na.rm = TRUE)) # get mean counts
+
+# Plot bars and set fill to party/gender as well as x-axis
+# Set colors to fill manually (hex codes from plot provided)
+# facet wrap on metric, specify cols and rows and let y-axis vary
+# Add axis labels and title of plot
+# Use theme_minimal
+# Remove fill legend and change text sizes
+ggplot(fb, aes(x = x, y = mean, fill = x)) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(limits = c('D-F', 'D-M', 'R-F', 'R-M'),
+                    values = c('#000D8E', '#0021FF', '#8C0D00', '#FF2100')) +
+  facet_wrap('social_metric', nrow = 2, ncol = 4, scales = 'free_y') +
+  labs(x = 'Party and gender of Member of Congress', 
+       y = 'Average of each type of social metric',
+       title = 'Partisan asymmetries by gender in Facebook popularity metrics',
+       subtitle = 'Female Democrats receive more engagement than Male Democrats. The opposite is true for Republicans.') +
+  theme_minimal() +
+  theme(legend.position = 'none',
+        plot.title = element_text(size = 14),
+        plot.subtitle = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        axis.text.x = element_text(size = 10),
+        strip.text = element_text(size = 10))
+
+```
+
+![](plots/party-gender-FB-metrics.png)
+
+## 3. Ideology of presidential candidates in the US (22 points)
+
+For this exercise, try to replicate the plot below, which Pablo Barbera prepared for a [Washington Post blog post](https://www.washingtonpost.com/news/monkey-cage/wp/2015/06/16/who-is-the-most-conservative-republican-candidate-for-president/?utm_term=.081a276328ad) a few years ago.
+
+The plot combines two sources of data: The ideology estimates for each actor (available in `ideology_1.csv`) and a random sample of ideology estimates for the three density plots (in `ideology_2.csv`).
+
+As a clue, Pablo used `theme_tufte` from the `ggthemes` package as main theme (which he then edited manually). But there may be other ways of replicating it.
+
+```{r}
+# Data for main plot
+ideology <- read.csv("data/ideology_1.csv")
+
+# Data for background plots
+bg <- read.csv("data/ideology_2.csv")
+```
+
+
+```{r, fig.width=10}
+# Your code here
+
+# Recode type in bg to get republican on top
+bg <- bg %>%
+  mutate(type = factor(type, levels = c('Z', 'Democrat', 'Republican')))
+
+# Get means for lines
+mean_bg <- bg %>%
+  group_by(type) %>%
+  summarize(mean = mean(ideology, na.rm = T)) %>% 
+  cbind(data.frame(text = c('Average Twitter User',
+                            'Average Democrat\nin 114th Congress',
+                            'Average Republican\nin 114th Congress')))
+
+# Make density plot and split by type
+# Add vlines for means
+# Add text for mean lines
+# Add points for reps
+# Add horizontal error bars
+# Add text to points in 2 steps (some to the left some to the right)
+# Adjust colors, axes, labels, and theme
+ggplot(bg) +
+  geom_density(aes(ideology, fill = type), color = alpha('white', alpha = 0), alpha = .3) +
+  geom_vline(data = mean_bg, aes(xintercept = mean, color = type), alpha = .3, size = .3) +
+  geom_text(data = mean_bg[1:2,], aes(x = mean, label = text, y=0.26), color = 'black', angle = 90, size = 1.8, vjust = -.2) +
+  geom_text(data = mean_bg[3,], aes(x = mean, label = text, y=1.35), color = 'black', angle = 90, size = 1.8, vjust = -.2) +
+  geom_point(data = ideology, aes(x = twscore, y = seq(.05, 1.6, by = .05),
+                                  color = party),
+             size = .9) +
+  geom_errorbarh(data = ideology, aes(xmax = twscore + 2 * twscore.sd,
+                                      xmin = twscore - 2 * twscore.sd,
+                                      y = seq(.05, 1.6, by = .05),
+                                      color = party),
+                 height = 0, size = .3) +
+  geom_text(data = ideology[1:21,], aes(x = twscore + 2 * twscore.sd + .02, y = seq(.05, 1.05, by = .05), label = screen_name, color = party), size = 2, hjust = 'left') +
+  geom_text(data = ideology[22:32,], aes(x = twscore - 2 * twscore.sd - .02, y = seq(1.1, 1.6, by = .05), label = screen_name, color = party), size = 2, hjust = 'right') +
+  scale_fill_manual(limits = c('Democrat', 'Republican', 'Z'),
+                    values = c('Blue', 'Red', 'Black')) +
+  scale_color_manual(limits = c('Democrat', 'Republican', 'Z'),
+                    values = c('Blue', 'Red', 'Black')) +
+  scale_x_continuous(limits = c(-2.5, 2.5)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1.65)) +
+  labs(x = 'Position on latent ideological scale',
+       title = 'Twitter ideology scores of potential Democratic and Republican presidential primary candidates') +
+  theme_tufte() +
+  theme(legend.position = 'none',
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.x = element_text(size = 8),
+        plot.title = element_text(face = 'bold', size = 8, hjust = .5))
+  
+```
+
+![](plots/ideology-plot.png)
+
+
+## 4. Own visualisation (40 points)
+
+Download health data from the [World Health Organization](https://www.who.int/data/gho), economic data from the [St. Louis Federal Reserve](https://fred.stlouisfed.org/), and/or data on wealth and income inequality from the [World Inequality Database](https://wid.world/data/). Choose data you are most interested in. Then explore and illustrate the data with `ggplot2` plot(s). You might thereby notice that for some of these data there are APIs, but you can also just download the relevant data manually if easier. This will not affect the grade in this exercise as the task is about visualisation only.
+
+## Answers
+
+*To start off this exercise, I downloaded 4 datasets: (a) country-level data on the number of mental health facilities (e.g. hospitals) per 100k people, (b) country-level data on the number of mental health workers (e.g. psychiatrists) per 100k people, (c) country-level estimated depression rates as a percentage of total population, and (d) GDP per capita by country. The first 3 datasets were taken from the WHO, and the final dataset was collected from the WID. These datasets were collected in order to look into the relationships between depression rates, GDP per capita, and access to mental health care. The observations in some datasets were sampled during different years, e.g. mental health facilities come from 2015-2017 and depression rates and GDP per capita come from 2015. This lowers reliability of the comparisons in the visualizations somewhat.*
+
+*To begin with, data was loaded into R and cleaned before visualizing.*
+
+```{r}
+# Your code here
+
+# Load data
+# number of mental health staff by country (from WHO)
+psych <- read.csv('/Users/sam/Documents/MH_6,MH_7,MH_8,MH_9.csv',
+                  col.names = c('country', 'year', 'psychiatrists', 'nurses',
+                     'social_workers', 'psychologists'))
+
+# Number of mental health facilities by country (from WHO)
+ment <- read.csv('/Users/sam/Documents/MH_10,MH_11,MH_14,MH_17,MH_18.csv',
+                 col.names = c('country', 'year', 'hospitals', 
+                               'units', 'outpatient', 
+                               'day_treatment', 'community_facilities'))
+
+# Depression rate by country (from WHO)
+depression <- read.csv('/Users/sam/Documents/depression.csv')
+depression <- depression %>%
+  dplyr::select(ParentLocationCode, ParentLocation, SpatialDimValueCode,
+          Location, Period, FactValueNumeric)
+colnames(depression) <- c('parent_loc_code', 'parent_loc', 'country_code',
+                'country', 'year', 'depression_rate')
+
+# GDP per capita by country (from WID)
+gdp <- read.csv('/Users/sam/Documents/gdpcap.csv', 
+                skip = 1, sep = ';', header = F)
+
+# Select contry and year and change column names
+gdp <- gdp %>%
+  dplyr::select(V1, V5)
+colnames(gdp) <- c('country', 'gdp_cap')
+
+# combine mental health, depression and gdp data
+combined_df <- ment %>%
+  left_join(psych, by = 'country') %>%
+  left_join(., depression, by = 'country') %>%
+  left_join(., gdp, by = 'country') %>%
+  dplyr::select(country, hospitals, units, outpatient, day_treatment,
+                community_facilities, psychiatrists, nurses,
+                social_workers, psychologists,
+                parent_loc, depression_rate, gdp_cap)
+
+```
+
+
+*The first visualization aims to display depression rates across the world. This is done by plotting a world map with the color of each country relating to its depression rate.*
+
+```{r, fig.width=10}
+# Depression rates across the world
+# First combine depression and map data by countrycode (drops some countries)
+depression <- depression %>%
+  mutate(country_code = countrycode(country, origin = 'country.name', destination = 'iso3c'))
+
+map.data <- map_data('world') %>%
+  mutate(country_code = countrycode(region, origin = 'country.name', destination = 'iso3c')) %>%
+  left_join(depression, by = 'country_code') %>%
+  mutate(region = countrycode(country_code, origin = 'iso3c', destination = 'country.name'))
+
+# Use code from previous weeks and alter it for specific task
+ggplot(map.data) + 
+  geom_map(aes(map_id = region), map = map.data, fill = '#292929', 
+    color = '#ffffff', size = 0.25) + 
+  expand_limits(x = map.data$long, y = map.data$lat) +
+  geom_map(aes(map_id = region, fill = depression_rate), map = map.data) +
+  scale_fill_viridis(option = 'F', direction = -1, name = 'Depression rate \n(% of population)') +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(title = 'Depression rates across the world (2015)',
+       subtitle = 'Gray areas are missing data') +
+    # Removing unnecessary graph elements
+  theme(plot.title = element_text(size = 12),
+        plot.subtitle = element_text(size = 10),
+        axis.line = element_blank(), 
+    	  axis.text = element_blank(), 
+    	  axis.ticks = element_blank(), 
+        axis.title = element_blank(), 
+        panel.background = element_rect(fill = '#d4ebff',
+                                color = '#d4ebff'), 
+        panel.border = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        plot.background = element_blank())
+
+```
+
+*Next, we seek to answer the question "Does money make you happy?" This is done by plotting each country's GDP per capita on a logarithmic scale against the country's depression rate. To gain further insight in how this relationship changes by region, the color of each point represents the country's world region. From the plot, we can see that depression rates seem to be higher for countries with higher GDP per capita. We also see similarities from the previous world map plot, where countries in Africa and South-East Asia are generally in the bottom left of the plot. The Americas seem to have average GDP per capita and depression rates, and European countries have generally higher GDP per capita and depression rates. The text labels show us some interesting outliers, such as Ukraine, which has a very high depression rate but a fairly average GDP per capita. From the plot it seems that money does not make you happier. However, it is important to note that this is of course not a causal visualization, it only shows a correlation with proxy variables for money and depression.*
+
+```{r}
+# gdp per capita and depression rate
+ggplot(combined_df, 
+       aes(x = gdp_cap, y = depression_rate, color = parent_loc, label = country)) +
+  geom_point(alpha = .7) +
+  geom_text_repel() +
+  labs(x = 'GDP per capita (log-scale)',
+       y = 'Depression rate (% of population)') +
+  scale_x_log10(label = comma) +
+  guides(color = guide_legend(override.aes = list(size=3, alpha = 1),
+                              title = 'World Region')) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 10))
+```
+
+*Next, we try to get some further insight on how depression rates are related to mental health care availability. We attempt to do this in two separate ways. To start off we attempt to plot the depression rate of each country against each type of mental health facility per 100k people of each country. Again, we color the points based on the region of the country and the size of the point represents the GDP per capita. From these plots, we see that the European countries have relatively many mental health facilities across the board. Again, the African countries generally have fewer facilities, and are almost completely missing from community and day treatment facilities. The Americas seem fairly dispersed over the range of countries. There seems to be a general trend of countries with higher GDP per capita to have more mental health facilities, but the relationship is not necessarily strong.*
+
+```{r, fig.width = 12}
+# depression rate and staff/facilities
+comb_longer_fac <- combined_df %>%
+  pivot_longer(c(hospitals, units, outpatient, 
+               day_treatment, community_facilities),
+               names_to = 'Facility', values_to = 'Value')
+
+ggplot(comb_longer_fac, aes(x = Value, y = depression_rate, size = gdp_cap,
+                        color = parent_loc)) +
+  geom_point(alpha = .5) +
+  scale_x_log10(label = comma) +
+  labs(x = 'Mental health facilities per 100k population',
+       y = 'Depression rate (% of population)') +
+  guides(color = guide_legend(override.aes = list(size=3, alpha = 1),
+                              title = 'World Region'),
+         size = guide_legend(override.aes = list(alpha = 1),
+                             title = 'GDP per capita')) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 10)) +
+  facet_wrap('Facility', nrow = 2, scales = 'free_x')
+
+```
+
+*To visualize the relationship between number of mental health workers and depression rates, we use a slightly different approach. Instead of splitting the plot by type of worker (similar to the facilities plot), the number of workers per 100k people were summed up into one measure (total workers per 100k people). This method has the advantage of creating a more simple plot that is easier to view and interpret. However, due to missing data for many countries, only 72 out of 163 observations (44.17%) remained when removing rows with missing data. Summing data without removing missing observations would be problematic as it could give lower estimates for countries with missing values.*
+
+*The plot shows the same general trend as the mental health facilities plot. European countries tend to have higher depression rates, higher number of mental health workers, and higher GDP per capita. African countries again are seen at the bottom left of the plot, and the Americas and Eastern Mediterranean seem to be dispersed along the middle and top-right. The Western Pacific interestingly is comparatively low on depression and high on total workers. Again, as the sample remaining for this plot is less than half of the original sample, the visualization might portray a skewed picture of the real relationship.*
+
+```{r}
+# Summed instead
+summed_comb <- combined_df %>%
+  drop_na(psychiatrists, nurses, social_workers, psychologists) %>%
+  group_by(country, gdp_cap, depression_rate, parent_loc) %>%
+  summarize(total_workers = sum(psychiatrists, nurses,
+                                social_workers, psychologists,
+                                na.rm = T))
+
+# Depression rate and workers + GDP
+ggplot(summed_comb, aes(x = total_workers, y = depression_rate, size = gdp_cap,
+                        color = parent_loc)) +
+  geom_point(alpha = .5) +
+  scale_x_log10(label = comma) +
+  labs(x = 'Total mental health workers per 100k population',
+       y = 'Depression rate (% of population)') +
+  guides(color = guide_legend(override.aes = list(size=3, alpha = 1),
+                              title = 'World Region'),
+         size = guide_legend(override.aes = list(alpha = 1),
+                             title = 'GDP per capita')) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 10))
+```
+

@@ -1,0 +1,278 @@
+---
+title: "MY472 - Assignment 2"
+author: "Friedrich Geiecke"
+date: "11/10/2021"
+output: html_document
+---
+
+General note: Make sure that when knitting your markdown file, your code in Exercises 1-3 actually scrapes all information again. In other words, do not load data from files in interim steps where it is unclear how these files were obtained. Instead, the grader needs to see from your code that it scrapes all information when it actually runs/is knitted.
+
+
+### Exercise 1 (20 points)
+
+Write a programme __using XPaths or CSS selectors__ which collects all names of LSE graduate courses depicted on the following website https://lse-my472.github.io/week04/lse_courses.html and stores these course names in a character vector. You can use `rvest` or `RSelenium` for this, whatever you prefer. 
+
+The first elements of your vector should therefore be:
+
+"AC411 Accounting, Strategy and Control",
+"AC412 Accountability, Organisations and Risk Management",
+"AC415 Management Accounting for Decision Making",
+"AC416 Topics in Financial Reporting",
+...
+
+How many unique course names did you scrape, i.e. how many unique elements does the vector have? Also print out its first 100 elements, i.e. the first 100 course names.
+
+Hint 1: To change the XPath within a loop, you can use the `sprintf` function that was also used in coding session three of week 4.
+
+Hint 2: If you choose the approach to loop over all XPaths of course names, one challenge is that each department has varying numbers of courses. One way is to choose a high number of iterations for the inner loop over course names in a department and to make sure the code keeps running even if respective XPaths were not found for a given department, i.e. if that department offered fewer courses. In `rvest`, functions like `html_nodes()` or `html_elements()` do not produce an error if no associated element was found. If you use `RSelenium`, you might find the `findElements()` function more useful than `findElement()` because the former returns a list of length zero when the element does not exist rather than throwing an error.
+
+
+```{r}
+library(rvest)
+library(tidyverse)
+
+# read page
+url <- 'https://lse-my472.github.io/week04/lse_courses.html'
+html <- read_html(url)
+
+# get elements with //p xpath (courses)
+relevant_elements <- html_elements(html, xpath = '//p')
+
+# turn into a vector
+x = html_text(relevant_elements)
+
+# print output
+print(paste('The number of unique items in the list is:', length(unique(x))))
+print(x[1:100])
+```
+
+
+### Exercise 2 (10 points)
+
+Scrape the table with the 50 highest grossing films from https://en.wikipedia.org/wiki/List_of_highest-grossing_films, process the data, and store it in a data frame or Tibble. Then plot the data with the rank on the x-axis, world-wide gross on the y-axis, and points being annotated by movie titles.
+
+```{r}
+library(ggrepel)
+
+# read page
+url <- 'https://en.wikipedia.org/wiki/List_of_highest-grossing_films'
+html <- read_html(url)
+
+# find table by xpath
+html_tab <- html_element(html, xpath = '//*[@id="mw-content-text"]/div[1]/table[1]/tbody')
+
+# get table and turn into tibble
+# change colnames to make Wordwide_Gross easier to handle
+tab <- html_table(html_tab, fill = TRUE)
+top_grossing <- as_tibble(tab)
+colnames(top_grossing) <- c('Rank', 'Peak', 'Title',
+                            'Worldwide_Gross', 'Year', 'References')
+
+# remove superscript from Peak
+# remove stuff before $ in grossing (some superscripts)
+# remove all non-numeric stuff from grossing
+top_grossing <- top_grossing %>%
+  mutate(Peak = as.numeric(str_remove(Peak, '\\D+\\w')),
+         Worldwide_Gross = str_remove(Worldwide_Gross, '.+?(?=[$])')) %>%
+  mutate(Worldwide_Gross = as.numeric(str_remove_all(Worldwide_Gross, '\\W')))
+
+# plot with ggplot
+# in this case, I use geom_text_repel to avoid overlap (removes 41 labels)
+# could use geom_text only, but will be hard to read
+ggplot(top_grossing, aes(x = Rank, y = Worldwide_Gross, label = Title)) +
+  geom_point() +
+  geom_text_repel() +
+  labs(y = 'Worldwide gross') +
+  theme_minimal()
+
+```
+
+
+### Exercise 3 (70 points)
+
+This is an open ended exercise that allows you to demonstrate your knowledge about scraping tables and unstructured data more broadly. You can think of it as a coding analogue to an independent project or essay. The goal is to scrape, process, and then illustrate data from the English Wikipedia https://en.wikipedia.org/ (or other contents from Wikimedia https://commons.wikimedia.org/wiki/Main_Page). Think of a topic you are particularly interested in, it could e.g. be about historical sport tournaments, art or music, literature, science, politics, the Covid crisis, etc. 
+
+3.1 Write code which scrapes all relevant tables and further information from Wikipedia which you would like to analyse and illustrate.
+
+3.2 Clean all data and store it in one or more data frames/tibbles. For each of the final data frames with the cleaned data, print out the first rows.
+
+3.3 Illustrate your findings. This can be a combination of a written answer, running some computations with base R and packages such as `dplyr`, and/or illustrating the data with figures. Note that plots with base R will receive the same points as plots with `ggplot2` as we have not discussed `ggplot2` in depth yet.
+
+Note 1: Wikipedia also has an API which can be more convenient for such projects, however, as the purpose of this assignment is to develop skills in web scraping, do not use this API here. Also make sure to avoid sending too many requests to the website too quickly by adding some short pauses into the code.
+
+Note 2: Information on the Wikipedia can of course be edited at any time. If your chosen article/s is/are subject to regular edits that could change the content/structure of the page (and possibly break your code) you may want to use the permanent link to a particular revision of your article. To get this link for an article, click ‘View history’ (top right), then the top entry for the time & date. This is not essential, but will ensure your code is reproducible when being graded.
+
+## Native languages in Finland's biggest municipalities
+
+For this exercise, I will be looking at data on the 15 biggest municipalities in Finland, available from Finland's English Wikipedia article. The initial data comes from a table with the 15 largest municipalities by population, under the 'Administrative divisions' section. Along with the data from the table, each individual municipality page was visited. From these pages, the proportion of inhabitants that had Finnish, Swedish, or Other as their native language was scraped and added to the table. The code for this process is presented below:
+
+```{r}
+library(gridExtra)
+
+# Get initial url and read
+finland_url <- 'https://en.wikipedia.org/wiki/Finland'
+fin_html <- read_html(finland_url)
+
+# Get table with municipality data
+table <- fin_html %>% html_element(xpath = '//*[@id="mw-content-text"]/div[1]/table[3]') %>%
+  html_table(fill = TRUE)
+
+# Get links from table
+# In this case, end of link to certain page, e.g. /wiki/Helsinki
+links <- fin_html %>%
+  html_element(xpath = '//*[@id="mw-content-text"]/div[1]/table[3]') %>%
+  html_elements(xpath = '//td/b/a') %>% 
+  html_attr('href')
+
+# Make emtpy data frame to fill with language data
+# Loop over links save d from before
+native_lang <- data.frame()
+for(city in links) {
+  # url is wikipedia + link ending from vector
+  url <- paste('https://en.wikipedia.org', city, sep = '')
+  city_html <- read_html(url)
+  
+  # Get the text from the sidebar on the right with municipality info
+  texty <- city_html %>%
+  html_element(xpath = '//*[contains(concat( " ", @class, " " ), concat( " ", "vcard", " " ))]') %>%
+  html_elements(xpath = '//*[contains(concat( " ", @class, " " ), concat( " ", "infobox-data", " " ))]') %>% 
+  html_text()
+  
+  # The only item with the word 'official' in it is the Finnish language one
+  # Thus, we select that element and the following 2 (Swedish + Other)
+  # This is added to the language df
+  native_lang <- rbind(native_lang, texty[which(grepl('official', texty)):(which(grepl('official', texty))+2)])
+  
+  Sys.sleep(2)
+
+}
+
+# Add languages to the table
+table <- table %>%
+  mutate(
+    Finnish = native_lang[,1],
+    Swedish = native_lang[,2],
+    Other = native_lang[,3]
+  )
+
+# Cut out middle 2 columns of table containing maps on wikipedia
+table <- table[,c(1:4, 7:9)]
+
+# Change column names to be easier to work with
+colnames(table) <- c('City', 'Population', 'Land_Area',
+                     'Density', 'Finnish', 'Swedish', 'Other')
+
+# Show result
+table
+```
+
+Next, the data was cleaned. Comma separators and percentage signs (for languages) were removed. Additionally, the column for Finnish language contained the word 'official' within brackets, which was removed. All numerical variables were turned converted to numerical from character. A longer format of the data was created for plotting, by pivoting the data on the language columns such that the frequency data became a variable along with a variable denoting which language the row referred to. The original table was maintained to run some basic hypothesis testing. The code for cleaning is presented below:
+
+```{r}
+# Remove commas, remove percentage signs and spaces
+# Remove '(official)' from Finnish language column
+# Divide language columns bu 100 to get decimal, not percentage
+table_clean <- table %>%
+  mutate(Population = as.numeric(str_remove_all(Population, ',')),
+         Land_Area = as.numeric(str_remove_all(Land_Area, ',')),
+         Density = as.numeric(str_remove_all(Density, ',')),
+         Finnish = as.numeric(str_remove_all(Finnish, '\\s|\\(.*\\)|\\%'))/100,
+         Swedish = as.numeric(str_remove_all(Swedish, '\\%'))/100,
+         Other = as.numeric(str_remove_all(Other, '\\%'))/100)
+
+# Make a long format table for plotting easier
+table_long <- table_clean %>%
+  pivot_longer(cols = c('Finnish', 'Swedish', 'Other'),
+               names_to = 'Language',
+               values_to = 'Frequency')
+```
+
+To visualize the relationship between municipality size and native language frequency, the population size was plotted against the frequency of Finnish, Swedish and Other speakers on separate axes.
+
+```{r, fig.cap = 'Scatter plots showing the relationship between population size and the frequency of people with Finnish, Swedish or Other as their native language.'}
+# Plot population against finnish, swedish, other
+# First make 3 individual plots and add to list
+plot_list_p <- list()
+i = 1
+for(lang in c('Finnish', 'Swedish', 'Other')) {
+  plot_list_p[[i]] <- ggplot(table_long[table_long$Language == lang,], 
+              aes(x = Population, y = Frequency, label = City)) +
+  geom_point() +
+  labs(title = lang) +
+  theme_minimal()
+  
+  i <- i + 1
+}
+
+# Same for population density
+plot_list_d <- list()
+i = 1
+for(lang in c('Finnish', 'Swedish', 'Other')) {
+  plot_list_d[[i]] <- ggplot(table_long[table_long$Language == lang,], 
+              aes(x = Density, y = Frequency, label = City)) +
+  geom_point() +
+  labs(title = lang) +
+  theme_minimal()
+  
+  i <- i + 1
+}
+
+# Plot population with grid.arrange, making 3 plots stacked on top of one another
+grid.arrange(plot_list_p[[1]],
+             plot_list_p[[2]],
+             plot_list_p[[3]],
+             ncol = 1, nrow = 3, 
+             widths = 4.5, heights = c(5, 5, 5))
+```
+The plots show a somewhat negative relationship between the frequency of Finnish native speakers and population size and a positive relationship between frequency of Other languages and population size. To test this, simple linear regressions were run with population size as the predictor and frequency of Finnish, Swedish, and Other native speakers as the target variable. Variables were z-scored to receive standardized beta coefficients. There was no significant relationship between population size and Finnish native speakers ($\beta = -.322 (.263), t = -1.227, p = .242$) or Swedish native speakers ($\beta = .093 (.276), t = .337, p = .742$). There was a significant positive relationship between population size and Other native speakers ($\beta = .754 (.182), t = 4.132, p = .001$). This suggests that larger municipalities in Finland have a higher frequency of individuals whose native tongue is not Finnish or Swedish.
+
+```{r}
+# simple regressions on population and language frequencies
+summary(lm(scale(Finnish) ~ scale(Population), data = table_clean))
+summary(lm(scale(Swedish) ~ scale(Population), data = table_clean))
+summary(lm(scale(Other) ~ scale(Population), data = table_clean))
+```
+
+Next, the same visualizations and models were run for population density and native language frequency. Population density is highly correlated with population size in our sample (Pearson correlation: $r(13) = .955, p < .001$), suggesting differences between outcomes fro population size and density will not be too large. However, this analysis was still run to see if there might be slight nuances in results. From figure 2, we note similar patterns to the population size plots. Finnish native speakers seem to make up a smaller part of the population in more dense municipalities, with no relationship for Swedish speakers and a positive relationship for Other native languages.
+
+```{r, fig.cap = 'Scatter plots showing the relationship between population density and the frequency of people with Finnish, Swedish or Other as their native language.'}
+cor.test(table_clean$Population, table_clean$Density)
+
+# Plot density with grid.arrange, making 3 plots stacked on top of one another
+grid.arrange(plot_list_d[[1]],
+             plot_list_d[[2]],
+             plot_list_d[[3]],
+             ncol = 1, nrow = 3, 
+             widths = 4.5, heights = c(5, 5, 5))
+```
+
+Testing this with the same models as for population size, but switching size out for density, we find no significant relationship between Finnish speakers and density ($\beta = -.476 (.245), t = -1.953, p = .073$), no relationship for Swedish speakers ($\beta = .251 (.269), t = .936, p = .367$), but a positive relationship for Other languages ($\beta = .836 (.152), t = 5.49, p < .001$). As expected, these results are qualitatively the same as for population size.
+
+```{r}
+# model population density
+summary(lm(scale(Finnish) ~ scale(Density), data = table_clean))
+summary(lm(scale(Swedish) ~ scale(Density), data = table_clean))
+summary(lm(scale(Other) ~ scale(Density), data = table_clean))
+```
+
+As the model with population density and Other languages saw the strongest relationship, the model assumptions were checked. The residual vs. fitted plot suggest the linearity assumption is violated and the scale-location plot suggest homoscedasticity is violated. Additionally, the residuals vs leverage plot shows that we have a problematic outlier (Helsinki) influencing modeling results. The QQ-plot shows that normality of residuals was not violated.
+
+```{r}
+mod <- lm(scale(Other) ~ scale(Density), data = table_clean)
+
+plot(mod)
+
+```
+
+#### Conclusion
+
+From this analysis, we have been able to see a pattern where population size and population density are both related to the frequency of native speakers of other languages than Finnish and Swedish in Finnish municipalities. The underlying reason for these results are beyond the scope of this analysis, but some scholars suggest these trends emerge as a result of increased immigration to larger cities due to the availability of jobs (Chiswick & Miller, 2004). The results of this analysis should be taken carefully due to low sample size and the use of only the largest 15 municipalities in Finland. A more thorough analysis would gather data on all Finnish municipalities and might add other variables to come to more nuanced, insightful conclusions.
+
+
+## References
+
+Chiswick, B.R. & Miller, P.W. (2004) Where Immigrants Settle in the United States, Journal of Comparative Policy Analysis: Research and Practice, 6:2, 185-197, DOI: 10.1080/1387698042000273479
+
+
+
+

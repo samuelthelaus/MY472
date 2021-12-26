@@ -15,10 +15,10 @@ source("https://gist.githubusercontent.com/JBGruber/dee4c44e7d38d537426f57ba1e4f
 
 ```{r, cache=TRUE}
 # Create authentication
-authentication <- list(consumer_key = "12OFs3CMESm3daEBoc4RTOpQM",
-                 consumer_secret = "CKpLbPYJhmaMzXVQ5Bd8YZBnt8KMCAV9QNcmtVVW1xrsA00Mtn",
-                 access_token = "383860067-jFdLhlR05ihLC1liBakggUpi4PIuoJmi2OXsuXMd",
-                 access_token_secret = "LOKu4qPtK346AZG81assmpdJ4kTGqkkUS1l4VW73qO8aR")
+authentication <- list(consumer_key = REDACTED,
+                 consumer_secret = REDACTED,
+                 access_token = REDACTED,
+                 access_token_secret = REDACTED)
 
 # Get twitter token
 twitter_token <- create_token(app = "enter your app name here", 

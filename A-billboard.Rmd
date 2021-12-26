@@ -1,0 +1,124 @@
+# Part A. Analysis of data from the Billboard charts
+
+Note: A few of the exercises might require to study some functionalities of packages such as `dplyr`. One great source is the book `R for Data Science` by Wickham and Grolemund https://r4ds.had.co.nz/. 
+
+The file `billboard.csv` contains information about every song that appeared in the Billboard Top 100 charts between 1990 and 2000. Each row corresponds to a different song. The variables are:
+
+| Name | Description |
+| --- | --- | --- |
+`year` | year in which song first charted |
+`month` | month in which song first charted |
+`weeks_charted` | number of weeks song charted |
+`high` | peak position |
+`artist` | artist name |
+`title` | song name |
+`genre` | type of music |
+`bpm` | beats per minute (tempo) |
+`length` | length of song (in seconds) |
+
+Open the `.csv` file into `R`. Make sure you use the option `stringsAsFactors=F` so that text is not converted into factors. 
+
+```{r}
+# load packages
+suppressMessages(library(tidyverse))
+
+# import data
+billboard = read.csv('billboard.csv', stringsAsFactors = F)
+
+head(billboard)
+```
+
+1. How many different songs charted during this period? (3 points)
+
+```{r}
+# as each row contains a unique title, count rows
+n_songs = nrow(billboard)
+
+print(paste('There are', n_songs, 'unique songs in the dataset.'))
+```
+
+2. What is the median number of weeks that songs during this period stayed in the Billboard Top 100 Chart? (3 points)
+
+```{r}
+# get median values, piping for the sake of piping
+med_wk = billboard %>%
+  summarise(Median = median(weeks_charted))
+
+print(paste('The median number of weeks charted was:', med_wk))
+```
+
+3. What is the maximum number of weeks that any song charted during this period? What song was it? (5 points)
+
+```{r}
+# Filter to get row with max weeks_charted, then select title & weeks
+max_song = billboard %>%
+  filter(weeks_charted == max(weeks_charted)) %>%
+  select(c(title, weeks_charted))
+
+print(paste('The max weeks charted by any song was', max_song$weeks_charted, 'weeks. The song title was', max_song$title))
+```
+
+4. How many different songs charted at the peak position (number one)? (5 points)
+
+```{r}
+n_peak = billboard %>%
+  filter(high == 1) %>%
+  nrow()
+
+print(paste('The number of songs that went to number 1 was', n_peak))
+```
+
+5. What artist had the highest number of songs charting in the list during this period? (5 points)
+
+```{r}
+# count rows by artist and get max
+most_songs = billboard %>%
+  group_by(artist) %>%
+  summarise(num_songs = n()) %>%
+  filter(num_songs == max(num_songs))
+
+print(paste('The artist with the most songs was', most_songs$artist, 'with', most_songs$num_songs, 'songs.'))
+```
+
+6. Compute the median tempo of songs released during each month of the year. Plot this data using a line chart. Do you find any seasonal patterns? (10 points)
+
+```{r, fig.cap='Figure 1. Line plot showing the median BPM of songs for each month of the year.'}
+# need na.rm = T, as 412 missing values in bpm
+med_bpm = billboard %>%
+  group_by(month) %>%
+  summarise(med_bpm = median(bpm, na.rm = T))
+
+# plot
+ggplot(med_bpm, aes(month, med_bpm)) +
+  geom_line(col = 4) +
+  theme_minimal() +
+  scale_x_continuous(breaks = 1:12) +
+  labs(x = 'Month', y = 'Median BPM')
+
+```
+There seems to be some seasonal variation with BPM being slightly higher in winter, decreasing during spring and summer and reaching its minimum in August. The variation in the data is not presented in this plot, making it hard to draw any conclusions about effect.
+
+
+7. What was the most popular artist for each genre during this period? To answer this question, write a loop that iterates over each different genre. For each genre print into the console: 1) The genre, 2) the name of the artist of that genre with the highest number of songs charting in the Billboard list during this period, and 3) the number of songs. If there are several artists that share the highest number of Billboard songs in a genre, make sure to print out all their names. (12 points)
+
+```{r}
+# loop through unique genre in billboard and get artist + number of songs
+# print what we need
+for(gen in unique(billboard$genre)) {
+  most_song_by_gen = billboard %>%
+    filter(genre == gen) %>%
+    group_by(artist) %>%
+    summarise(num_songs = n()) %>%
+    filter(num_songs == max(num_songs))
+  
+  print(paste(gen, ': ', most_song_by_gen$artist, ' with ', most_song_by_gen$num_songs, ' songs.', sep = ''))
+}
+
+```
+
+
+
+
+
+
+

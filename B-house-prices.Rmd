@@ -1,0 +1,154 @@
+# Part B. Analysis of house price data
+
+Note: A few of the exercises might require to study some functionalities of packages such as `dplyr`. One great source is the book `R for Data Science` by Wickham and Grolemund https://r4ds.had.co.nz/. 
+
+The file `rhpi.csv` contains data from the International House Price Database from the Federal Reserve Bank of Dallas. It records the real housing price index. Make sure to use this file `rhpi.csv` contained in the repo for your assignment. If you are interested in the topic beyond this assignment, the raw data is available [here](https://www.dallasfed.org/institute/houseprice/~/media/documents/institute/houseprice/hp1701.xlsx).
+
+Open the `.csv` file into `R` and use `head()` to explore the first few rows of the dataset. 
+
+```{r}
+# load packages
+suppressMessages(library(tidyverse))
+suppressMessages(library(stringr))
+suppressMessages(library(lubridate))
+
+# import data
+rhpi = read.csv('rhpi.csv', stringsAsFactors = F)
+
+head(rhpi)
+```
+
+1.  You may find out that the first column name is empty. You can update the first column name to `country` by using the `colnames()` function (2 points)
+
+```{r}
+colnames(rhpi)[1] = 'country'
+```
+
+2. Is it in long or wide format? Discuss why or why not it is a `tidy` dataset. If not, reshape the dataset such that it becomes _tidy_. (8 points)
+
+The dataset is not tidy as all variables do not have a column. Year and quarter should have their own columns. We will achieve this using pivot_longer.
+
+```{r}
+# pivot_longer into year and quarter (sep colnames by 'Q.')
+# Then mutate by removing non-digits from year and make year + Q into numeric
+rhpi_long = rhpi %>%
+  pivot_longer(colnames(rhpi)[2:length(rhpi)], names_to = c('Year', 'Quarter'), names_sep = '.Q', values_to = 'Price') %>%
+  mutate(Year = stringr::str_remove(Year, '\\D')) %>%
+  mutate(Year = as.numeric(Year),
+         Quarter = as.numeric(Quarter))
+```
+
+__For the following exercises use the tidy version of the dataset.__
+
+3. Only for this part, filter the data frame so that it only contains the data that correspond to the US. Then, produce a line plot that tracks the housing price over time. What do you find? (8 points)
+
+The plot below shows that the housing prices generally went up from 2975 until the financial crisis in 2007 when the market burst. Since around 2011, the prices have gone up again.
+
+```{r, fig.cap='Figure 1. The figure shows the Real Housing Price Index against the Year from 1975 to 2017.'}
+# Filter to get only US values
+rhpi_us = rhpi_long %>%
+  filter(country == 'US')
+
+# geom_line gets average over quarters
+ggplot(rhpi_us, aes(x = Year, y = Price)) +
+  geom_line(col = 6) +
+  labs(x = 'Year', y = 'Real Housing Price Index') +
+  theme_minimal()
+
+```
+
+4. By what percentage did US house prices increase from Q4 2000 to Q4 2006? (4 points)
+
+```{r}
+per_inc = rhpi_us %>%
+  filter(Quarter == '4' & Year %in% c(2000, 2006)) %>%
+  summarise(Increase = Price/lag(Price) - 1) %>%
+  drop_na()
+
+print(paste('The housing prices in the US increased', 100*round(per_inc, 4), 'percent.'))
+  
+```
+
+5. Write a function that takes a country name as input and returns the average housing price over exactly the last 5 years of the dataset. Then, show that it works by running it for 3 different countries. (10 points)
+
+```{r}
+
+# function has rhpi_long as default and requires country_in
+# filter on country and then final 20 rows (5*4 quarters)
+avg_rhpi_5yr = function(data = rhpi_long, country_in) {
+  out = data %>%
+    filter(country == country_in) %>%
+    filter(row_number() >= (n() - 19)) %>%
+    summarise(Mean = mean(Price, na.rm = T))
+  
+  return(out)
+}
+
+for(c in c('Australia', 'Sweden', 'Israel')) {
+  print(avg_rhpi_5yr(country_in = c))
+}
+```
+
+6. If you haven't done so already for the plots, convert the year-quarter format into a date object and order the whole dataset in ascending and descending order based on the date variable. Print the first 10 and the last 10 rows of the sorted dataset. (6 points)
+
+```{r}
+# make date variable
+rhpi_long = rhpi_long %>%
+  mutate(Date = yq(paste(rhpi_long$Year, ': Q', rhpi_long$Quarter, sep = '')))
+
+# ascending
+rhpi_long %>%
+  arrange(Date) %>%
+  filter(row_number() %in% 1:10) %>%
+  print()
+
+# descending
+rhpi_long %>%
+  arrange(desc(Date)) %>%
+  filter(row_number() %in% 1:10) %>%
+  print()
+```
+
+7. Create a new column `ypc` which contains _year to year_ percentage changes of the index (e.g. (2004Q3 - 2003Q3)/2003Q3 ). Print out the earliest 10 quarters for France, UK, and the US. (7 points)
+
+Note: The earliest few percentage change values should be NA for each country, not just the first country.
+
+```{r}
+# calculate ypc wityh lag, n = 4, meaning first 4 rows will be NA for each country
+rhpi_long$ypc = NA
+for(i in 5:nrow(rhpi_long)) {
+  # check whether the country is same for lag 4 row
+  if(rhpi_long$country[i - 4] == rhpi_long$country[i]) {
+    rhpi_long$ypc[i] = (rhpi_long$Price[i] - rhpi_long$Price[i - 4])/rhpi_long$Price[i - 4]
+  }
+}
+
+# Loop, filter and print
+for(c in c('France', 'UK', 'US')) {
+  rhpi_long %>%
+    filter(country == c) %>%
+    filter(row_number() <= 10) %>%
+    print()
+}
+```
+
+8. For each country, compute the average yearly percentage change over the sample period, i.e. the mean of your new column `ypc` on a by country basis. Then create a final new column called __`demeaned_ypc`__ which contains the demeaned yearly percentage change. This means that it contains the `ypc` of each individual country-date observation minus the associated `ypc_mean`, i.e. minus the average `ypc` __of that respective country over the full sample__. Print out the earliest 10 quarters for France, UK, and the US. (12 points)
+
+```{r}
+ypc_mean = rhpi_long %>%
+  group_by(country) %>%
+  summarise(Mean = mean(ypc, na.rm = T))
+
+rhpi_long$demeaned_ypc = NA
+for(c in unique(rhpi_long$country)) {
+  rhpi_long$demeaned_ypc[rhpi_long$country == c] = rhpi_long$ypc[rhpi_long$country == c] - ypc_mean$Mean[ypc_mean$country == c]
+}
+
+# Loop, filter and print
+for(c in c('France', 'UK', 'US')) {
+  rhpi_long %>%
+    filter(country == c) %>%
+    filter(row_number() <= 10) %>%
+    print()
+}
+```
